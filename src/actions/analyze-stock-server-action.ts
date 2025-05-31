@@ -2,25 +2,27 @@
 'use server';
 
 import { analyzeStockData } from '@/ai/flows/analyze-stock-data';
-import { fetchStockData } from '@/ai/flows/fetch-stock-data';
-import { fetchStockDataFromPolygon } from '@/services/polygon-service';
+import { fetchStockDataFromSource } from '@/services/data-sources';
+import type { DataSourceId, AnalysisMode } from '@/services/data-sources/types'; // Added AnalysisMode
+import { ALLOWED_DATA_SOURCE_IDS } from '@/services/data-sources/types'; // Moved from data-sources/index.ts
+import type { AdapterOutput } from '@/services/data-sources/types';
 import type { AnalyzeStockDataInput, AnalyzeStockDataOutput, SingleTakeaway } from '@/ai/schemas/stock-analysis-schemas';
-import type { FetchStockDataInput, FetchStockDataFlowOutput, StockDataJson } from '@/ai/schemas/stock-fetch-schemas';
+import type { StockDataJson } from '@/ai/schemas/stock-fetch-schemas'; // Keep for parsing type
 import type { UsageReport } from '@/ai/schemas/common-schemas';
 import { z } from 'zod';
 
 const INPUT_PRICE_PER_MILLION_TOKENS = 0.15;
-const OUTPUT_PRICE_NON_THINKING_PER_MILLION_TOKENS = 0.60; // For fetchStockDataFlow
-const OUTPUT_PRICE_THINKING_PER_MILLION_TOKENS = 3.50;    // For analyzeStockDataFlow
+// Output prices are now mostly handled within adapters for AI-based data fetching,
+// but keep one for the analysis step.
+const OUTPUT_PRICE_THINKING_PER_MILLION_TOKENS = 3.50; // For analyzeStockDataFlow
 
-const ALLOWED_DATA_SOURCES = ["polygon-api", "ai-gemini-2.5-flash-preview-05-20"] as const;
 
 const ActionInputSchema = z.object({
   ticker: z.string()
     .min(1, { message: "Ticker symbol cannot be empty." })
     .max(10, { message: "Ticker symbol is too long (max 10 chars)." })
     .regex(/^[a-zA-Z0-9.-]+$/, { message: "Ticker can only contain letters, numbers, dots, and hyphens."}),
-  dataSource: z.enum(ALLOWED_DATA_SOURCES, {
+  dataSource: z.enum(ALLOWED_DATA_SOURCE_IDS, {
     errorMap: () => ({ message: "Invalid data source selected." })
   }),
   analysisMode: z.enum(['live', 'mock'], {
@@ -28,9 +30,8 @@ const ActionInputSchema = z.object({
   }),
 });
 
-
 export interface StockAnalysisState {
-  stockJson?: string; // Will now include marketStatus
+  stockJson?: string; 
   analysis?: AnalyzeStockDataOutput;
   error?: string;
   fieldErrors?: {
@@ -39,14 +40,14 @@ export interface StockAnalysisState {
     analysisMode?: string[] | undefined;
   };
   timestamp?: number;
-  fetchUsageReport?: UsageReport;
+  fetchUsageReport?: UsageReport; // This will now come from the AdapterOutput
   analysisUsageReport?: UsageReport;
 }
 
-function calculateUsageReport(
-  flowName: string,
+// This specific calculation is now only for the analysisUsageReport.
+// fetchUsageReport will be directly taken from the adapter if it's an AI adapter.
+function calculateAnalysisUsageReport(
   usage: { inputTokens?: number; outputTokens?: number } | undefined,
-  outputPriceTier: number
 ): UsageReport | undefined {
   if (!usage) return undefined;
 
@@ -54,11 +55,11 @@ function calculateUsageReport(
   const outputTokens = usage.outputTokens || 0;
 
   const inputCost = (inputTokens / 1_000_000) * INPUT_PRICE_PER_MILLION_TOKENS;
-  const outputCost = (outputTokens / 1_000_000) * outputPriceTier;
+  const outputCost = (outputTokens / 1_000_000) * OUTPUT_PRICE_THINKING_PER_MILLION_TOKENS;
   const totalCost = inputCost + outputCost;
 
   return {
-    flowName,
+    flowName: 'analyzeStockDataFlow', // Explicitly for analysis
     inputTokens,
     outputTokens,
     contextWindow: inputTokens + outputTokens,
@@ -73,13 +74,13 @@ export async function handleAnalyzeStock(
   console.log('[ACTION:AnalyzeStock] Entered handleAnalyzeStock.');
   const rawTicker = formData.get('ticker') as string | null;
   const tickerToUse = rawTicker?.trim() || "NVDA";
-  const dataSource = formData.get('dataSource') as string | null;
-  const analysisMode = formData.get('analysisMode') as 'live' | 'mock' | null;
+  const dataSourceFromForm = formData.get('dataSource') as string | null;
+  const analysisModeFromForm = formData.get('analysisMode') as 'live' | 'mock' | null;
 
   const validatedFields = ActionInputSchema.safeParse({
     ticker: tickerToUse,
-    dataSource: dataSource,
-    analysisMode: analysisMode,
+    dataSource: dataSourceFromForm,
+    analysisMode: analysisModeFromForm,
   });
 
   if (!validatedFields.success) {
@@ -92,91 +93,65 @@ export async function handleAnalyzeStock(
   }
   console.log('[ACTION:AnalyzeStock] Input validation successful:', validatedFields.data);
 
-  const { ticker, dataSource: validatedDataSource, analysisMode: validatedAnalysisMode } = validatedFields.data;
+  const { ticker, dataSource, analysisMode } = validatedFields.data;
   let fetchUsageReport: UsageReport | undefined;
   let analysisUsageReport: UsageReport | undefined;
-  let stockJsonData: string;
+  let stockDataJsonForAnalysis: StockDataJson;
+  let stockJsonStringForDisplay: string;
 
   try {
-    if (validatedDataSource === "ai-gemini-2.5-flash-preview-05-20") {
-      console.log(`[ACTION:AnalyzeStock] Using AI data source. Mock: ${validatedAnalysisMode === 'mock'}`);
-      const fetchInput: FetchStockDataInput = { ticker, forceMock: validatedAnalysisMode === 'mock' };
-      const fetchFlowResult: FetchStockDataFlowOutput = await fetchStockData(fetchInput);
-      console.log('[ACTION:AnalyzeStock] AI fetchStockData flow result:', fetchFlowResult);
-      
-      if (fetchFlowResult.error || !fetchFlowResult.data?.stockJson) {
-        console.error(`[ACTION:AnalyzeStock] AI could not retrieve/generate stock data. Error: ${fetchFlowResult.error}`);
-        return {
-          error: fetchFlowResult.error || `AI could not retrieve or generate stock data (mode: ${validatedAnalysisMode}).`,
-          timestamp: Date.now(),
-          fetchUsageReport: calculateUsageReport('fetchStockDataFlow', fetchFlowResult.usage, OUTPUT_PRICE_NON_THINKING_PER_MILLION_TOKENS),
-        };
-      }
-      stockJsonData = fetchFlowResult.data.stockJson;
-      fetchUsageReport = calculateUsageReport('fetchStockDataFlow', fetchFlowResult.usage, OUTPUT_PRICE_NON_THINKING_PER_MILLION_TOKENS);
-    }
-    else if (validatedDataSource === "polygon-api") {
-      if (validatedAnalysisMode === 'mock') {
-         console.log("[ACTION:AnalyzeStock] Polygon.io selected, but mode is 'mock'. Generating mock data via AI.");
-         const fetchInput: FetchStockDataInput = { ticker, forceMock: true };
-         const fetchFlowResult: FetchStockDataFlowOutput = await fetchStockData(fetchInput);
-         console.log('[ACTION:AnalyzeStock] AI fetchStockData (mock for Polygon) flow result:', fetchFlowResult);
-         
-         if (fetchFlowResult.error || !fetchFlowResult.data?.stockJson) {
-           console.error(`[ACTION:AnalyzeStock] AI could not generate mock stock data for Polygon. Error: ${fetchFlowResult.error}`);
-           return {
-             error: fetchFlowResult.error || `AI could not generate mock stock data for Polygon source (mode: ${validatedAnalysisMode}).`,
-             timestamp: Date.now(),
-             fetchUsageReport: calculateUsageReport('fetchStockDataFlow (mock for Polygon)', fetchFlowResult.usage, OUTPUT_PRICE_NON_THINKING_PER_MILLION_TOKENS),
-           };
-         }
-         stockJsonData = fetchFlowResult.data.stockJson;
-         fetchUsageReport = calculateUsageReport('fetchStockDataFlow (mock for Polygon)', fetchFlowResult.usage, OUTPUT_PRICE_NON_THINKING_PER_MILLION_TOKENS);
-      } else {
-         console.log(`[ACTION:AnalyzeStock] Fetching live data from Polygon.io for ${ticker}`);
-         try {
-            stockJsonData = await fetchStockDataFromPolygon(ticker); // This now includes market status first
-            console.log(`[ACTION:AnalyzeStock] Successfully fetched data from Polygon.io for ${ticker}.`);
-         } catch (polygonError: any) {
-            console.error(`[ACTION:AnalyzeStock] Error fetching from Polygon.io for ${ticker}:`, polygonError);
-            // Check if it's a market status failure specifically
-            if (polygonError.message && polygonError.message.toLowerCase().includes("market status")) {
-                 return {
-                    error: `Failed to fetch critical market status from Polygon.io for ${ticker}: ${polygonError.message}. Analysis aborted.`,
-                    timestamp: Date.now(),
-                };
-            }
-            return {
-                error: `Failed to fetch data from Polygon.io for ${ticker}: ${polygonError.message || 'Unknown error'}. Analysis aborted.`,
-                timestamp: Date.now(),
-            };
-         }
-      }
-    }
-    else {
-      console.error("[ACTION:AnalyzeStock] Invalid data source specified:", validatedDataSource);
-      return { error: "Invalid or unsupported data source specified.", timestamp: Date.now() };
+    console.log(`[ACTION:AnalyzeStock] Calling new fetchStockDataFromSource service for ${ticker}, Source: ${dataSource}, Mode: ${analysisMode}`);
+    const adapterOutput: AdapterOutput = await fetchStockDataFromSource(
+      ticker,
+      dataSource as DataSourceId, // Cast as it's validated
+      analysisMode as AnalysisMode // Cast as it's validated
+    );
+
+    fetchUsageReport = adapterOutput.usageReport; // Directly from adapter output
+
+    if (adapterOutput.error || !adapterOutput.stockDataJson) {
+      console.error(`[ACTION:AnalyzeStock] Error from fetchStockDataFromSource: ${adapterOutput.error}`);
+      return {
+        error: adapterOutput.error || `Failed to retrieve or generate stock data (Source: ${dataSource}, Mode: ${analysisMode}).`,
+        timestamp: Date.now(),
+        fetchUsageReport, 
+      };
     }
 
-    console.log(`[ACTION:AnalyzeStock] Received stockJsonData (first 200 chars): ${stockJsonData.substring(0,200)}...`);
-    let parsedStockData: StockDataJson;
-    try {
-      parsedStockData = JSON.parse(stockJsonData);
-      console.log("[ACTION:AnalyzeStock] stockJsonData successfully parsed as JSON.");
-      if (validatedDataSource === "polygon-api" && validatedAnalysisMode === 'live' && !parsedStockData.marketStatus) {
-        console.warn("[ACTION:AnalyzeStock] Live Polygon data is missing marketStatus. This is unexpected.");
-      }
-    } catch (e) {
-      console.error("[ACTION:AnalyzeStock] Received stockJson is NOT valid JSON:", stockJsonData, e);
-      return { error: 'The data source returned invalid JSON. Please try again.', timestamp: Date.now(), fetchUsageReport };
+    stockDataJsonForAnalysis = adapterOutput.stockDataJson;
+    
+    // Ensure critical marketStatus is present if from Polygon live, as it's a prerequisite for analysis.
+    // AI adapters also have a TODO to ensure marketStatus is present.
+    if (dataSource === 'polygon-api' && analysisMode === 'live' && !stockDataJsonForAnalysis.marketStatus) {
+        const errorMsg = `Critical: Live Polygon data for ${ticker} is missing marketStatus. Analysis aborted.`;
+        console.error(`[ACTION:AnalyzeStock] ${errorMsg}`);
+        return { error: errorMsg, timestamp: Date.now(), fetchUsageReport };
     }
+    if (!stockDataJsonForAnalysis.marketStatus) { // General check, especially for AI sources
+        const errorMsg = `Data for ${ticker} from ${dataSource} is missing critical marketStatus. Analysis cannot proceed reliably.`;
+        console.warn(`[ACTION:AnalyzeStock] ${errorMsg}`);
+        // Potentially allow analysis to proceed but with a warning, or return error.
+        // For now, let's return an error if marketStatus is missing for any source.
+        return { error: errorMsg, timestamp: Date.now(), fetchUsageReport };
+    }
+
+    // Stringify for display and for passing to AI analysis flow
+    try {
+        stockJsonStringForDisplay = JSON.stringify(stockDataJsonForAnalysis, null, 2);
+         console.log(`[ACTION:AnalyzeStock] Successfully stringified stockDataJsonForAnalysis. Length: ${stockJsonStringForDisplay.length}`);
+    } catch (e: any) {
+        console.error("[ACTION:AnalyzeStock] Failed to stringify stockDataJsonForAnalysis:", e.message, stockDataJsonForAnalysis);
+        return { error: `Internal error processing stock data: ${e.message}`, timestamp: Date.now(), fetchUsageReport };
+    }
+    console.log(`[ACTION:AnalyzeStock] Received stockDataJson (first 200 chars of string): ${stockJsonStringForDisplay.substring(0,200)}...`);
+
 
     console.log("[ACTION:AnalyzeStock] Proceeding to AI analysis.");
-    const analysisInput: AnalyzeStockDataInput = { stockData: stockJsonData }; 
+    const analysisInput: AnalyzeStockDataInput = { stockData: stockJsonStringForDisplay }; 
     const analysisFlowResult = await analyzeStockData(analysisInput); 
     console.log('[ACTION:AnalyzeStock] AI analyzeStockData flow result:', analysisFlowResult);
 
-    analysisUsageReport = calculateUsageReport('analyzeStockDataFlow', analysisFlowResult.usage, OUTPUT_PRICE_THINKING_PER_MILLION_TOKENS);
+    analysisUsageReport = calculateAnalysisUsageReport(analysisFlowResult.usage);
 
     const isValidTakeaway = (takeaway: any): takeaway is SingleTakeaway => {
         return takeaway && typeof takeaway.text === 'string' && takeaway.text.trim() !== '' &&
@@ -193,7 +168,7 @@ export async function handleAnalyzeStock(
       console.error("[ACTION:AnalyzeStock] AI analysis did not return all required takeaways with valid text/sentiment. Output:", analysisFlowResult.analysis);
       return {
         error: "AI analysis could not generate all required takeaways or they were empty/invalid. The data might be insufficient or an internal error occurred.",
-        stockJson: stockJsonData,
+        stockJson: stockJsonStringForDisplay,
         timestamp: Date.now(),
         fetchUsageReport,
         analysisUsageReport,
@@ -201,7 +176,7 @@ export async function handleAnalyzeStock(
     }
     
     const finalState = {
-      stockJson: stockJsonData,
+      stockJson: stockJsonStringForDisplay,
       analysis: analysisFlowResult.analysis, 
       timestamp: Date.now(),
       fetchUsageReport,
@@ -213,9 +188,7 @@ export async function handleAnalyzeStock(
   } catch (e: any) {
     console.error("[ACTION:AnalyzeStock] Unexpected error in handleAnalyzeStock:", e);
     let displayError = `Failed to process stock '${ticker}'.`;
-     if (e.message && (e.message.toLowerCase().includes("market status") || e.message.toLowerCase().includes("polygon"))) {
-        displayError = e.message; 
-    } else if (e.message) {
+    if (e.message) {
         displayError += ` ${e.message}`;
     } else {
         displayError += " An unexpected error occurred.";
@@ -223,4 +196,3 @@ export async function handleAnalyzeStock(
     return { error: displayError, timestamp: Date.now(), fetchUsageReport, analysisUsageReport };
   }
 }
-

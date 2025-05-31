@@ -32,13 +32,24 @@ const fetchStockDataPromptDefinition = ai.definePrompt({
   prompt: `
 {{#if forceMock}}
 You MUST generate realistic mock data for the given ticker '{{{ticker}}}'. Do NOT attempt to find or use live data. The data must be purely fictional but plausible.
+You MUST also generate a realistic mock 'marketStatus' object including 'market' (e.g., 'closed', 'regular', 'extended-hours'), 'serverTime' (current ISO string reflecting the time of generation), and 'exchanges' (e.g., nyse: 'closed', nasdaq: 'closed', otc: 'closed', or 'open' states if market is 'regular').
 {{else}}
-You are a financial data service. Given a stock ticker: {{{ticker}}}, you MUST use the Google Search tool provided to retrieve the LATEST, REAL-TIME stock quote data and provide it as a JSON object. It is crucial that you use the search tool to get current information for your response.
-If, after using Google Search, real-time data is genuinely unavailable for '{{{ticker}}}', you MAY generate realistic mock data. If you generate mock data, you must clearly state within the JSON itself (e.g., in a ticker or description field if allowed by the schema, otherwise imply through plausible but generic data) that the data is mocked.
+You are a financial data service. Given a stock ticker: {{{ticker}}}, you MUST use the Google Search tool provided to retrieve the LATEST, REAL-TIME stock quote data and the CURRENT market status (market open/closed, server time, exchange status). Provide all this information as a JSON object. It is crucial that you use the search tool to get current information for your response.
+If, after using Google Search, real-time data is genuinely unavailable for '{{{ticker}}}', you MAY generate realistic mock data, including a mock 'marketStatus'. If you generate mock data, you must clearly state within the JSON itself (e.g., in a ticker or description field if allowed by the schema, otherwise imply through plausible but generic data) that the data is mocked. The 'marketStatus' is still mandatory.
 {{/if}}
 
-The JSON object must conform to the following structure:
+The JSON object must conform to the following structure. The "marketStatus" field is MANDATORY.
 {
+  "marketStatus": {
+    "market": "string (e.g., 'regular', 'closed', 'extended-hours', 'unknown')",
+    "serverTime": "string (Current ISO date string, e.g., '2023-10-27T10:00:00.000Z')",
+    "exchanges": { 
+      "nyse": "string|null (e.g., 'open', 'closed')", 
+      "nasdaq": "string|null", 
+      "otc": "string|null"
+    },
+    "currencies": { "fx": "string|null", "crypto": "string|null" }
+  },
   "stockQuote": {
     "ticker": "string (the input ticker, uppercased)",
     "price": "number (current price or previous day's close, prefer 2 decimal places)",
@@ -62,6 +73,11 @@ The output should be ONLY the JSON string content, without any surrounding text,
 
 Example for ticker "MOCK" (if generating mock data):
 {
+  "marketStatus": {
+    "market": "closed",
+    "serverTime": "${new Date().toISOString()}",
+    "exchanges": { "nyse": "closed", "nasdaq": "closed", "otc": "closed" }
+  },
   "stockQuote": {
     "ticker": "MOCK",
     "price": 150.75,
@@ -78,7 +94,7 @@ Example for ticker "MOCK" (if generating mock data):
     "macd": { "value": 0.85, "signal": 0.70, "histogram": 0.15 }
   }
 }
-Ensure your output for {{{ticker}}} is valid JSON.
+Ensure your output for {{{ticker}}} is valid JSON and ALWAYS includes the 'marketStatus' field.
 `,
 });
 console.log('[FLOW:FetchStockData] fetchStockDataPromptDefinition defined.');
@@ -100,7 +116,7 @@ const fetchStockDataFlow = ai.defineFlow(
       response = await fetchStockDataPromptDefinition(input, {
         model: 'googleai/gemini-2.5-flash-preview-05-20',
         toolConfig: {
-          googleSearchRetrieval: { mode: 'FORCE' } // Changed from "auto" to "FORCE" to ensure tool use
+          googleSearchRetrieval: { mode: 'FORCE' } 
         }
       });
     }
@@ -112,11 +128,17 @@ const fetchStockDataFlow = ai.defineFlow(
       throw new Error('AI did not return a valid stock JSON data string.');
     }
     try {
-      JSON.parse(response.output.stockJson);
-      console.log('[FLOW:FetchStockData:Internal:JSONValid] Generated stockJson successfully parsed as JSON.');
+      // Basic JSON validation
+      const parsedData = JSON.parse(response.output.stockJson);
+      // Advanced validation: ensure marketStatus is present as per new requirement
+      if (!parsedData.marketStatus || typeof parsedData.marketStatus !== 'object') {
+        console.error("[FLOW:FetchStockData:Internal:JSONError] Generated stockJson is MISSING the required 'marketStatus' field or it's not an object:", response.output.stockJson);
+        throw new Error("AI returned JSON missing the required 'marketStatus' field or it's malformed.");
+      }
+      console.log('[FLOW:FetchStockData:Internal:JSONValid] Generated stockJson successfully parsed as JSON and contains marketStatus.');
     } catch (e: any) {
-      console.error("[FLOW:FetchStockData:Internal:JSONError] Generated stockJson is NOT valid JSON:", response.output.stockJson, "Error:", e.message);
-      throw new Error(`AI returned an invalid JSON string for stock data: ${e.message}`);
+      console.error("[FLOW:FetchStockData:Internal:JSONError] Generated stockJson is NOT valid JSON or misses critical fields:", response.output.stockJson, "Error:", e.message);
+      throw new Error(`AI returned an invalid JSON string for stock data or it's missing critical fields: ${e.message}`);
     }
     
     const successResult = {

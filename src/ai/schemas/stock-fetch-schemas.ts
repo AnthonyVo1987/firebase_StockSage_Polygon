@@ -8,13 +8,13 @@ export const DISABLED_BY_CONFIG_TEXT = "disabled_by_config";
 
 // Schema for market status
 export const MarketStatusDataSchema = z.object({
-  market: z.enum(["extended-hours", "regular", "closed"]).describe("Overall market status (e.g., 'regular', 'closed')."),
+  market: z.enum(["extended-hours", "regular", "closed", "unknown"]).describe("Overall market status (e.g., 'regular', 'closed', 'unknown')."),
   serverTime: z.string().datetime().describe("The current server time in ISO format."),
   exchanges: z.object({
     nyse: z.string().optional().describe("Status of the NYSE exchange."),
     nasdaq: z.string().optional().describe("Status of the NASDAQ exchange."),
     otc: z.string().optional().describe("Status of the OTC exchange."),
-  }).describe("Status of major exchanges."),
+  }).optional().describe("Status of major exchanges."), // Optional for AI simplicity if some exchanges are unknown
   currencies: z.object({
     fx: z.string().optional().describe("Status of the FX market."),
     crypto: z.string().optional().describe("Status of the Crypto market."),
@@ -71,8 +71,8 @@ export type TechnicalAnalysisData = z.infer<typeof TechnicalAnalysisDataSchema>;
 
 // Main schema for the combined stock data (market status + quote + TA)
 export const StockDataJsonSchema = z.object({
-  marketStatus: MarketStatusDataSchema.optional().describe("Current overall market status."),
-  stockQuote: StockQuoteDataSchema.optional(), // Optional because market status might fail before we get this
+  marketStatus: MarketStatusDataSchema.describe("Current overall market status. This field is MANDATORY."), // No longer optional
+  stockQuote: StockQuoteDataSchema.optional(), // Optional because market status might fail before we get this, or AI might not find it
   technicalAnalysis: TechnicalAnalysisDataSchema.optional(), // TA might not always be available or fetched
 }).describe("Combined market status, stock quote, and technical analysis data.");
 export type StockDataJson = z.infer<typeof StockDataJsonSchema>;
@@ -86,13 +86,13 @@ export type FetchStockDataInput = z.infer<typeof FetchStockDataInputSchema>;
 
 // The output from the AI model (just the JSON string conforming to StockDataJsonSchema)
 export const FetchStockDataOutputSchema = z.object({
-  stockJson: z.string().describe('A JSON string containing the combined market status, stock quote, and technical analysis data, conforming to the defined StockDataJsonSchema structure.'),
+  stockJson: z.string().describe('A JSON string containing the combined market status, stock quote, and technical analysis data, conforming to the defined StockDataJsonSchema structure. The "marketStatus" field is MANDATORY within this JSON string.'),
 });
 export type FetchStockDataOutput = z.infer<typeof FetchStockDataOutputSchema>;
 
 // Schema for the full output of the fetchStockDataFlow, including usage
 export const FetchStockDataFlowOutputSchema = z.object({
-  data: FetchStockDataOutputSchema.optional(), // Optional because flow might fail (e.g. market status)
+  data: FetchStockDataOutputSchema.optional(), // Optional because flow might fail
   usage: z.object({
     inputTokens: z.number().optional(),
     outputTokens: z.number().optional(),
