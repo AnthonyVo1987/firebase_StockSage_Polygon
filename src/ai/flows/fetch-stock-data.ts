@@ -14,6 +14,7 @@ import {
   FetchStockDataFlowOutputSchema, // Flow's output including usage
   type FetchStockDataFlowOutput // Flow's output type
 } from '@/ai/schemas/stock-fetch-schemas';
+import { DEFAULT_DATA_FETCH_MODEL_ID } from '@/ai/models'; // Import the centralized model ID
 
 console.log('[FLOW:FetchStockData] Initializing FetchStockData Flow...');
 
@@ -29,6 +30,7 @@ const fetchStockDataPromptDefinition = ai.definePrompt({
   name: 'fetchStockDataPrompt',
   input: {schema: FetchStockDataInputSchema},
   output: {schema: FetchStockDataOutputSchema}, // AI model output schema
+  model: DEFAULT_DATA_FETCH_MODEL_ID, // Use the centralized constant as the default model for this prompt
   prompt: `
 {{#if forceMock}}
 You MUST generate realistic mock data for the given ticker '{{{ticker}}}'. Do NOT attempt to find or use live data. The data must be purely fictional but plausible.
@@ -109,12 +111,15 @@ const fetchStockDataFlow = ai.defineFlow(
     console.log('[FLOW:FetchStockData:Internal] Entered fetchStockDataFlow (Genkit flow). Input:', input);
     let response;
     if (input.forceMock) {
-      console.log('[FLOW:FetchStockData:Internal] Force mock is true. Using default model for mock data generation.');
+      console.log('[FLOW:FetchStockData:Internal] Force mock is true. Using prompt default model for mock data generation.');
+      // The prompt definition now specifies DEFAULT_DATA_FETCH_MODEL_ID.
+      // The prompt text instructs the AI *not* to use tools if forceMock is true.
       response = await fetchStockDataPromptDefinition(input);
     } else {
-      console.log('[FLOW:FetchStockData:Internal] Force mock is false. Using Gemini 2.5 Flash with Google Search grounding for live data.');
+      console.log('[FLOW:FetchStockData:Internal] Force mock is false. Using prompt default model for live data with Google Search grounding.');
+      // The prompt definition model (DEFAULT_DATA_FETCH_MODEL_ID) will be used.
+      // We only need to override/set the toolConfig here for live data.
       response = await fetchStockDataPromptDefinition(input, {
-        model: 'googleai/gemini-2.5-flash-preview-05-20',
         toolConfig: {
           googleSearchRetrieval: { mode: 'FORCE' } 
         }
@@ -151,3 +156,4 @@ const fetchStockDataFlow = ai.defineFlow(
 );
 console.log('[FLOW:FetchStockData] fetchStockDataFlow (Genkit flow) defined.');
 console.log('[FLOW:FetchStockData] FetchStockData Flow Initialized.');
+

@@ -14,6 +14,7 @@ import {
   ChatFlowOutputSchema,
   type ChatFlowOutput
 } from '@/ai/schemas/chat-schemas';
+import { DEFAULT_CHAT_MODEL_ID } from '@/ai/models'; // Import the centralized model ID
 
 export async function chatWithBot(input: ChatInput): Promise<ChatFlowOutput> {
   console.log('[FLOW:Chat] Entered chatWithBot wrapper. User prompt:', input.userPrompt, 'Stock JSON present:', !!input.stockJson, 'Analysis summary present:', !!input.analysisSummary, 'History items:', input.chatHistory?.length || 0);
@@ -75,7 +76,7 @@ const chatPrompt = ai.definePrompt({
   input: { schema: ChatInputSchema },
   output: { schema: ChatOutputSchema },
   tools: [webSearchTool],
-  model: 'googleai/gemini-2.5-flash-preview-05-20',
+  model: DEFAULT_CHAT_MODEL_ID, // Use the centralized constant
   toolConfig: {
     googleSearchRetrieval: {}
   },
