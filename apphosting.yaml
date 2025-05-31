@@ -1,0 +1,20 @@
+
+# Settings to manage and configure a Firebase App Hosting backend.
+# https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  # Increase this value if you'd like to automatically spin up
+  # more instances in response to increased traffic.
+  maxInstances: 1
+
+# Environment variables that will be available to your application code.
+# It's highly recommended to store sensitive values like API keys in
+# Google Secret Manager and reference them here.
+#
+# 1. Create secrets in Google Secret Manager (e.g., POLYGON_API_KEY, GOOGLE_API_KEY).
+# 2. Replace YOUR_PROJECT_ID with your actual Google Cloud Project ID.
+# 3. Ensure your App Hosting service account has permissions to access these secrets.
+environmentVariables:
+  POLYGON_API_KEY: "{{ sm://projects/stocksage-fnyrp/secrets/POLYGON_API_KEY }}"
+  GOOGLE_API_KEY: "{{ sm://projects/stocksage-fnyrp/secrets/GOOGLE_API_KEY }}"
+

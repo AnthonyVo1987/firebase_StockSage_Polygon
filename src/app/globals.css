@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 208 36% 95%; /* Light Gray #F0F4F7 */
+    --foreground: 210 15% 25%; /* Darker, slightly desaturated blue/gray for text */
+
+    --card: 0 0% 100%; /* White */
+    --card-foreground: 210 15% 25%;
+
+    --popover: 0 0% 100%; /* White */
+    --popover-foreground: 210 15% 25%;
+
+    --primary: 207 86% 68%; /* Soft Blue #64B5F6 */
+    --primary-foreground: 0 0% 100%; /* White */
+
+    --secondary: 207 80% 88%; /* Lighter shade of primary */
+    --secondary-foreground: 207 30% 30%; /* Darker text for secondary */
+
+    --muted: 208 30% 90%; /* Muted version of background */
+    --muted-foreground: 208 20% 50%; /* Lighter text for muted elements */
+
+    --accent: 125 39% 64%; /* Muted Green #81C784 */
+    --accent-foreground: 0 0% 100%; /* White text on accent */
+
+    --destructive: 0 84.2% 60.2%; /* Default shadcn destructive red */
+    --destructive-foreground: 0 0% 98%; /* Default shadcn destructive-foreground */
+    
+    --border: 208 25% 85%; /* Border derived from background/primary */
+    --input: 0 0% 100%; /* White input background, consistent with cards */
+    --ring: 207 86% 68%; /* Ring color same as primary for focus */
+
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.5rem;
+
+    /* Sidebar variables - updated for consistency, though not heavily used in this app */
+    --sidebar-background: 208 30% 92%; 
+    --sidebar-foreground: 210 15% 30%;
+    --sidebar-primary: 207 86% 68%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 207 80% 80%;
+    --sidebar-accent-foreground: 210 15% 25%;
+    --sidebar-border: 208 25% 80%;
+    --sidebar-ring: 207 86% 68%;
+  }
+
+  .dark {
+    --background: 210 10% 12%; /* Dark blue-gray */
+    --foreground: 208 36% 95%; /* Light gray from light theme */
+
+    --card: 210 10% 18%; /* Slightly lighter dark blue-gray */
+    --card-foreground: 208 36% 95%;
+
+    --popover: 210 10% 12%;
+    --popover-foreground: 208 36% 95%;
+
+    --primary: 207 70% 58%; /* Slightly desaturated/darker primary for dark mode */
+    --primary-foreground: 0 0% 100%; /* White */
+
+    --secondary: 207 50% 30%; /* Darker secondary */
+    --secondary-foreground: 208 36% 90%;
+
+    --muted: 210 10% 22%;
+    --muted-foreground: 208 20% 60%;
+
+    --accent: 125 30% 54%; /* Slightly desaturated/darker accent for dark mode */
+    --accent-foreground: 0 0% 100%; /* White */
+
+    --destructive: 0 72% 51%; /* Adjusted destructive for dark */
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 210 10% 25%;
+    --input: 210 10% 20%;
+    --ring: 207 70% 58%; /* Ring color same as primary for dark mode */
+
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+
+    /* Sidebar variables - dark theme */
+    --sidebar-background: 210 10% 15%;
+    --sidebar-foreground: 208 36% 90%;
+    --sidebar-primary: 207 70% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 207 50% 35%;
+    --sidebar-accent-foreground: 208 36% 95%;
+    --sidebar-border: 210 10% 22%;
+    --sidebar-ring: 207 70% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
