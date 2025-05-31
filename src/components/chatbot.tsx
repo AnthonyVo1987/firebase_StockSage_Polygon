@@ -1,11 +1,9 @@
 
 'use client';
 
-import React, { useState, useRef, useEffect, useActionState, startTransition } from 'react';
-import { useFormStatus } from 'react-dom';
-import { handleChatSubmit } from '@/actions/chat-server-action';
-import type { ChatState, ChatMessage } from '@/ai/schemas/chat-schemas';
-import type { UsageReport } from '@/ai/schemas/common-schemas';
+import React, { useState, useRef, useEffect, startTransition } from 'react';
+import type { ChatMessage } from '@/ai/schemas/chat-schemas';
+import { examplePrompts } from '@/ai/schemas/chat-prompts'; // Import centralized prompts
 import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,37 +13,29 @@ import { SendHorizonal, ChevronsUpDown, Loader2, Copy, Download, AlertTriangle, 
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm'; 
+import { useStockAnalysisContext } from '@/contexts/stock-analysis-context';
+import { downloadFile, copyToClipboardUtil, getCurrentTimestampForFile, formatJsonForExport } from '@/lib/export-utils';
 
-interface ChatbotProps {
-  stockJson?: string;
-  analysis?: AnalyzeStockDataOutput; 
-  cumulativeStats: { totalCost: number; totalInputTokens: number; totalOutputTokens: number; requestCount: number; };
-  updateCumulativeStats: (report: UsageReport) => void;
-}
-
-interface ExamplePrompt {
-  id: string;
-  label: string;
-  promptText: string;
-}
-
-const examplePrompts: ExamplePrompt[] = [
-  { id: 'ex_stock_takeaways', label: "Stock Trader's Key Takeaways (Uses Provided Data)", promptText: "Based on all the provided stock JSON data and the AI analysis summary, what are the key takeaways specifically for a stock trader looking at this information? Focus on price action, support/resistance if identifiable, volume implications (if data available), and short-term outlook." },
-  { id: 'ex_options_takeaways', label: "Options Trader's Key Takeaways (Uses Provided Data)", promptText: "Given the provided stock JSON data and AI analysis summary, what are the key considerations for an options trader? Discuss potential volatility implications, upcoming catalysts if known, and how the current trend might influence options strategies (e.g., bullish, bearish, neutral plays)." },
-  { id: 'ex_additional_analysis', label: "Additional Holistic Analysis (5 Points)", promptText: "Please provide 5 additional holistic key takeaways based on all the provided stock data and analysis. You can decide which areas to focus on for these additional points to give a broader perspective." },
-];
 
 function SubmitChatButtonInternal() {
-  const { pending } = useFormStatus();
+  const { chatFormPending } = useStockAnalysisContext();
   return (
-    <Button type="submit" size="icon" variant="ghost" disabled={pending} className="text-primary hover:text-primary/80">
-      {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizonal className="h-5 w-5" />}
+    <Button type="submit" size="icon" variant="ghost" disabled={chatFormPending} className="text-primary hover:text-primary/80">
+      {chatFormPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizonal className="h-5 w-5" />}
       <span className="sr-only">Send message</span>
     </Button>
   );
 }
 
-export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCumulativeStats }: ChatbotProps) {
+export default function Chatbot() {
+  const {
+    stockAnalysisServerState,
+    chatServerState,
+    submitChatForm,
+    chatFormPending,
+    updateCumulativeStats,
+  } = useStockAnalysisContext();
+
   const [inputValue, setInputValue] = useState('');
   const [isInputExpanded, setIsInputExpanded] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -53,33 +43,33 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
   const { toast } = useToast();
   const latestChatStateTimestamp = useRef<number | undefined>();
 
-  const initialChatState: ChatState = { messages: [] };
-  const [chatState, formAction, formPending] = useActionState(handleChatSubmit, initialChatState);
-
   useEffect(() => {
-    console.log(`[CLIENT:Chatbot] Chatbot component mounted. Initial Stock JSON present: ${!!stockJson}, Initial Analysis present: ${!!analysis}`);
+    console.log(`[CLIENT:Chatbot] Chatbot component mounted/context updated.`);
   }, []); 
 
   useEffect(() => {
-    if (chatState?.timestamp && chatState.timestamp !== (latestChatStateTimestamp.current ?? 0) ) {
-      latestChatStateTimestamp.current = chatState.timestamp;
-      console.log('[CLIENT:Chatbot] New chatState received from server action:', JSON.stringify(chatState, null, 2));
+    if (chatServerState?.timestamp && chatServerState.timestamp !== (latestChatStateTimestamp.current ?? 0) ) {
+      latestChatStateTimestamp.current = chatServerState.timestamp;
+      console.log('[CLIENT:Chatbot] New chatServerState received from context:', JSON.stringify(chatServerState, null, 2));
 
-      const latestAiMessage = chatState.messages.filter(m => m.sender === 'ai' && !m.isError).pop();
+      const latestAiMessage = chatServerState.messages.filter(m => m.sender === 'ai' && !m.isError).pop();
       if (latestAiMessage?.usageReport) {
           updateCumulativeStats(latestAiMessage.usageReport);
           toast({ title: "AI Responded", description: `Chatbot provided a response. Cost: $${latestAiMessage.usageReport.cost.toFixed(6)}` });
       }
 
-      if (chatState.error) {
-        const errorAlreadyInMessages = chatState.messages.some(m => m.isError && m.text.includes(chatState.error!));
+      if (chatServerState.error) {
+        const errorAlreadyInMessages = chatServerState.messages.some(m => m.isError && m.text.includes(chatServerState.error!));
         if (!errorAlreadyInMessages) {
-            toast({ variant: "destructive", title: "Chatbot Error", description: chatState.error });
+            toast({ variant: "destructive", title: "Chatbot Error", description: chatServerState.error });
         }
       }
-      setInputValue(''); 
+      // Clear input only if the submission was successful (no error in chatServerState and an AI message was added)
+      if (!chatServerState.error && latestAiMessage) {
+        setInputValue(''); 
+      }
     }
-  }, [chatState, updateCumulativeStats, toast]);
+  }, [chatServerState, updateCumulativeStats, toast]);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -88,7 +78,7 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
         scrollElement.scrollTop = scrollElement.scrollHeight;
       }
     }
-  }, [chatState?.messages]);
+  }, [chatServerState?.messages]);
 
   const constructAnalysisSummary = (currentAnalysis?: AnalyzeStockDataOutput): string | undefined => {
     if (!currentAnalysis) return undefined;
@@ -113,76 +103,69 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
     return summaryParts.length > 0 ? summaryParts.join('\n') : undefined;
   };
 
-  const submitFormData = (formData: FormData) => {
-    if (stockJson) {
-        formData.set('stockJson', stockJson);
+  const doSubmitFormData = (formData: FormData) => {
+    if (stockAnalysisServerState?.stockJson) {
+        formData.set('stockJson', stockAnalysisServerState.stockJson);
     }
     
-    const analysisSummary = constructAnalysisSummary(analysis);
+    const analysisSummary = constructAnalysisSummary(stockAnalysisServerState?.analysis);
     if (analysisSummary) {
         formData.set('analysisSummary', analysisSummary);
     }
     
-    const currentMessages = chatState?.messages || [];
+    const currentMessages = chatServerState?.messages || [];
     formData.set('chatHistory', JSON.stringify(currentMessages));
         
     startTransition(() => {
-      formAction(formData);
+      submitChatForm(formData);
     });
   };
 
   const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!inputValue.trim() || formPending) {
+    if (!inputValue.trim() || chatFormPending) {
         return;
     }
     const formData = new FormData(event.currentTarget);
-    submitFormData(formData);
+    // inputValue is already set on formData by the Textarea's name prop
+    doSubmitFormData(formData);
   };
 
   const handleExamplePromptClick = (promptText: string) => {
     setInputValue(promptText); 
-    const formData = new FormData();
+    const formData = new FormData(); // Create new FormData for example prompts
     formData.set('userPrompt', promptText);
-    // Ensure other necessary form data is set before submitting
-    submitFormData(formData);
+    doSubmitFormData(formData);
   };
 
-
-   const getCurrentTimestampForFile = () => {
-    const now = new Date();
-    return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-  };
-
-  const handleDownloadJson = (contentToDownload: string | object, baseFilename: string) => {
+  const handleDownloadChatResponse = (contentToDownload: string | object) => {
+    const ticker = stockAnalysisServerState?.stockJson ? (JSON.parse(stockAnalysisServerState.stockJson)?.stockQuote?.ticker || 'AI_CHAT') : 'AI_CHAT';
     const timestamp = getCurrentTimestampForFile();
-    const filename = `${baseFilename}_${timestamp}.json`;
-    const dataString = typeof contentToDownload === 'string' ? contentToDownload : JSON.stringify(contentToDownload, null, 2);
-    const blob = new Blob([dataString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const filename = `ai-chat-response_${ticker}_${timestamp}.md`; // Changed to .md for markdown content
+    const dataString = typeof contentToDownload === 'string' ? contentToDownload : formatJsonForExport(contentToDownload);
+    downloadFile(dataString, filename, 'text/markdown;charset=utf-8;');
     toast({ title: "Download Started", description: `${filename} is downloading.` });
   };
 
-  const handleCopyToClipboard = async (contentToCopy: string | object, contentType: string) => {
-    const textToCopy = typeof contentToCopy === 'string' ? contentToCopy : JSON.stringify(contentToCopy, null, 2);
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      toast({ title: "Copied to Clipboard", description: `${contentType} copied successfully.` });
-    } catch (err) {
-      toast({ variant: "destructive", title: "Copy Failed", description: `Could not copy ${contentType} to clipboard.` });
-    }
+  const handleCopyChatResponse = async (contentToCopy: string | object) => {
+    const textToCopy = typeof contentToCopy === 'string' ? contentToCopy : formatJsonForExport(contentToCopy);
+    await copyToClipboardUtil(textToCopy, toast, 'AI Chat Response');
   };
 
-  const messagesToDisplay = chatState?.messages || [];
+
+  const messagesToDisplay = chatServerState?.messages || [];
   const latestAiMessageForControls = messagesToDisplay.filter(m => m.sender === 'ai' && !m.isError).pop();
-  console.log('[CLIENT:Chatbot] Render. Input value:', inputValue, 'Is expanded:', isInputExpanded, 'Messages count:', messagesToDisplay.length, 'Form pending:', formPending);
+  const stockJsonAvailable = !!stockAnalysisServerState?.stockJson;
+  
+  const analysisAvailable = !!stockAnalysisServerState?.analysis && 
+    !Object.values(stockAnalysisServerState.analysis).some(takeaway => 
+      takeaway.text.includes("pending") || takeaway.text.includes("could not be generated")
+    );
+
+  const examplePromptsDisabled = chatFormPending || (!stockJsonAvailable && !analysisAvailable);
+
+
+  console.log('[CLIENT:Chatbot] Render. Input value:', inputValue, 'Is expanded:', isInputExpanded, 'Messages count:', messagesToDisplay.length, 'Form pending:', chatFormPending, 'StockJSON available:', stockJsonAvailable, 'Analysis available:', analysisAvailable);
 
   return (
     <Card className="mt-8 w-full max-w-4xl mx-auto shadow-xl">
@@ -214,7 +197,12 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
                       {msg.text}
                     </ReactMarkdown>
                   ) : (
-                    msg.text.split('\n').map((line, i) => <p key={i} className="my-1">{line}</p>)
+                    msg.text.split('\n').map((line, i, arr) => (
+                      <React.Fragment key={i}>
+                        {line}
+                        {i < arr.length - 1 && <br />}
+                      </React.Fragment>
+                    ))
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground/70 mt-1">
@@ -222,7 +210,7 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
                 </p>
               </div>
             ))}
-             {formPending && (
+             {chatFormPending && (
                 <div className="flex items-start">
                     <div className="max-w-[75%] rounded-lg px-3 py-2 text-sm shadow bg-muted text-muted-foreground animate-pulse">
                         Thinking... 🤔
@@ -239,14 +227,14 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
             className="flex w-full items-start gap-2"
         >
           <Textarea
-            name="userPrompt"
+            name="userPrompt" 
             placeholder="Ask about stocks, options, or financial topics..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             rows={isInputExpanded ? 4 : 1}
             className="flex-grow resize-none transition-all duration-200 text-sm"
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !formPending) {
+              if (e.key === 'Enter' && !e.shiftKey && !chatFormPending) {
                 e.preventDefault();
                 formRef.current?.requestSubmit();
               }
@@ -271,8 +259,8 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
                 variant="outline"
                 size="sm"
                 onClick={() => handleExamplePromptClick(ep.promptText)}
-                disabled={formPending || (!stockJson && !analysis)} 
-                title={(!stockJson && !analysis) ? "Analyze a stock first to use this prompt" : ep.label}
+                disabled={examplePromptsDisabled}
+                title={examplePromptsDisabled ? "Analyze a stock first to use context-based prompts" : ep.label}
                 className="text-xs"
               >
                 <Zap className="h-3 w-3 mr-1.5" />
@@ -280,16 +268,16 @@ export default function Chatbot({ stockJson, analysis, cumulativeStats, updateCu
               </Button>
             ))}
         </div>
-        {(!stockJson && !analysis) && <p className="text-xs text-muted-foreground mt-1">Tip: Analyze a stock first to enable prompt examples that use context.</p>}
+        {(!stockJsonAvailable || !analysisAvailable) && <p className="text-xs text-muted-foreground mt-1">Tip: Analyze a stock first to enable prompt examples that use context.</p>}
       </CardFooter>
        {latestAiMessageForControls && (
         <div className="p-4 pt-0 border-t mt-0 flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Latest AI Response:</span>
-            <Button variant="outline" size="sm" onClick={() => handleCopyToClipboard(latestAiMessageForControls.text, 'AI Chat Response')} title="Copy AI Response">
+            <Button variant="outline" size="sm" onClick={() => handleCopyChatResponse(latestAiMessageForControls.text)} title="Copy AI Response">
                 <Copy className="h-3 w-3 mr-1.5" /> Copy
             </Button>
-            <Button variant="outline" size="sm" onClick={() => handleDownloadJson(latestAiMessageForControls.text, 'ai-chat-response')} title="Download AI Response as Text/Markdown">
-                <Download className="h-3 w-3 mr-1.5" /> Export
+            <Button variant="outline" size="sm" onClick={() => handleDownloadChatResponse(latestAiMessageForControls.text)} title="Download AI Response as Markdown (.md)">
+                <Download className="h-3 w-3 mr-1.5" /> Export (.md)
             </Button>
         </div>
       )}

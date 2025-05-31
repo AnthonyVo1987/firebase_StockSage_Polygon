@@ -4,10 +4,12 @@
 import { chatWithBot } from '@/ai/flows/chat-flow';
 import type { ChatInput, ChatState, ChatMessage } from '@/ai/schemas/chat-schemas';
 import type { UsageReport } from '@/ai/schemas/common-schemas';
+import { 
+  calculateUsageReport,
+  GEMINI_FLASH_INPUT_PRICE_USD_PER_MILLION_TOKENS,
+  GEMINI_FLASH_OUTPUT_CHAT_PRICE_USD_PER_MILLION_TOKENS
+} from '@/ai/utils/cost-calculator';
 import { z } from 'zod';
-
-const INPUT_PRICE_PER_MILLION_TOKENS = 0.15;
-const OUTPUT_PRICE_CHATBOT_PER_MILLION_TOKENS = 3.50;
 
 const ActionInputSchema = z.object({
   userPrompt: z.string().min(1, "Prompt cannot be empty."),
@@ -20,27 +22,6 @@ const ActionInputSchema = z.object({
     }))
   })).optional(),
 });
-
-function calculateChatUsageReport(
-  usage: { inputTokens?: number; outputTokens?: number } | undefined
-): UsageReport | undefined {
-  if (!usage) return undefined;
-
-  const inputTokens = usage.inputTokens || 0;
-  const outputTokens = usage.outputTokens || 0;
-
-  const inputCost = (inputTokens / 1_000_000) * INPUT_PRICE_PER_MILLION_TOKENS;
-  const outputCost = (outputTokens / 1_000_000) * OUTPUT_PRICE_CHATBOT_PER_MILLION_TOKENS;
-  const totalCost = inputCost + outputCost;
-
-  return {
-    flowName: 'chatFlow',
-    inputTokens,
-    outputTokens,
-    contextWindow: inputTokens + outputTokens,
-    cost: parseFloat(totalCost.toFixed(6)),
-  };
-}
 
 export async function handleChatSubmit(
   prevState: ChatState,
@@ -124,7 +105,13 @@ export async function handleChatSubmit(
 
     const flowResult = await chatWithBot(chatInput);
     console.log('[ACTION:Chat] chatWithBot flow result:', flowResult);
-    const aiUsageReport = calculateChatUsageReport(flowResult.usage);
+    
+    const aiUsageReport = calculateUsageReport(
+      'chatFlow',
+      flowResult.usage,
+      GEMINI_FLASH_INPUT_PRICE_USD_PER_MILLION_TOKENS,
+      GEMINI_FLASH_OUTPUT_CHAT_PRICE_USD_PER_MILLION_TOKENS
+    );
 
     const aiResponseMessage: ChatMessage = {
       id: crypto.randomUUID(),
