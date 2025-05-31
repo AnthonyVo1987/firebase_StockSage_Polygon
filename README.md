@@ -1,0 +1,2 @@
+# firebase_StockSage_Polygon
+firebase_StockSage_Polygon
