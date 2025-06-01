@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
@@ -28,18 +29,21 @@ export function ThemeProvider({
   storageKey = 'stocksage-ui-theme',
 }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<Theme>(() => {
+    let themeToSet = defaultTheme;
+    let storedTheme: Theme | null = null;
     if (typeof window !== 'undefined') {
       try {
-        const storedTheme = localStorage.getItem(storageKey) as Theme | null;
+        storedTheme = localStorage.getItem(storageKey) as Theme | null;
         if (storedTheme && (storedTheme === 'light' || storedTheme === 'dark')) {
-          return storedTheme;
+          themeToSet = storedTheme;
         }
       } catch (e) {
-        console.error('Error reading theme from localStorage', e);
+        console.error('[ThemeProvider] Error reading theme from localStorage', e);
         // Fallback to defaultTheme if localStorage is inaccessible or value is invalid
       }
     }
-    return defaultTheme;
+    console.log(`[ThemeProvider] Initial theme determination. Stored: "${storedTheme}", Default: "${defaultTheme}", Final initial: ${themeToSet}`);
+    return themeToSet;
   });
 
   useEffect(() => {
@@ -49,13 +53,15 @@ export function ThemeProvider({
       root.classList.add(theme);
       try {
         localStorage.setItem(storageKey, theme);
+        console.log(`[ThemeProvider] Applied theme to root: "${theme}". localStorage updated.`);
       } catch (e) {
-        console.error('Error saving theme to localStorage', e);
+        console.error('[ThemeProvider] Error saving theme to localStorage', e);
       }
     }
   }, [theme, storageKey]);
 
   const setTheme = (newTheme: Theme) => {
+    console.log(`[ThemeProvider] setTheme called. New theme: "${newTheme}"`);
     setThemeState(newTheme);
   };
 
@@ -78,3 +84,4 @@ export const useTheme = () => {
   }
   return context;
 };
+

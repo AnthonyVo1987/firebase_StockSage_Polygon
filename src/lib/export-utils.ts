@@ -45,6 +45,7 @@ export function formatJsonForExport(data: any): string {
   } else {
     dataString = JSON.stringify(data, null, 2);
   }
+  console.log(`[ExportUtils:FormatJSON] Input type: ${typeof data}. Output length: ${dataString.length}`);
   return dataString;
 }
 
@@ -93,7 +94,7 @@ function stockJsonToCsv(jsonString: string): string {
     }
     return csvRows.join("\n");
   } catch (e) {
-    console.error("[ExportUtils] Error parsing stockJson for CSV:", e);
+    console.error("[ExportUtils:StockToCSV] Error parsing stockJson for CSV:", e);
     return "Error: Could not parse stock JSON for CSV.";
   }
 }
@@ -156,17 +157,20 @@ export function convertToCsvForExport(
   titleForCsv: string, // Kept for consistent signature, though might not be used by all specific converters
   dataTypeHint?: 'stockJson' | 'analysis' | 'allPageData'
 ): string {
-  console.log(`[ExportUtils] convertToCsvForExport called. Title: ${titleForCsv}, DataTypeHint: ${dataTypeHint}`);
+  let result: string;
   if (dataTypeHint === 'stockJson' && typeof data === 'string') {
-    return stockJsonToCsv(data);
+    result = stockJsonToCsv(data);
   } else if (dataTypeHint === 'analysis' && typeof data === 'object' && data !== null) {
-    return analysisToCsv(data as AnalyzeStockDataOutput);
+    result = analysisToCsv(data as AnalyzeStockDataOutput);
   } else if (dataTypeHint === 'allPageData' && typeof data === 'object' && data !== null) {
-    return allPageDataToCsv(data);
+    result = allPageDataToCsv(data);
+  } else {
+    // Fallback for generic data or if hint is not provided/matched
+    if (typeof data === 'object' && data !== null) result = JSON.stringify(data);
+    else result = String(data);
   }
-  // Fallback for generic data or if hint is not provided/matched
-  if (typeof data === 'object' && data !== null) return JSON.stringify(data);
-  return String(data);
+  console.log(`[ExportUtils:FormatCSV] Title: "${titleForCsv}". DataTypeHint: "${dataTypeHint}". Input type: ${typeof data}. Output length: ${result.length}`);
+  return result;
 }
 
 /**
@@ -194,6 +198,7 @@ export function convertToTextForExport(data: any, title: string): string {
   } else {
     textContent += String(data);
   }
+  console.log(`[ExportUtils:FormatText] Title: "${title}". Input type: ${typeof data}. Output length: ${textContent.length}`);
   return textContent;
 }
 
@@ -204,6 +209,7 @@ export function convertToTextForExport(data: any, title: string): string {
  * @param mimeType - The MIME type of the content (e.g., 'application/json', 'text/plain').
  */
 export function downloadFile(content: string, filename: string, mimeType: string): void {
+  console.log(`[ExportUtils:Download] Initiating download. Filename: "${filename}", MimeType: "${mimeType}", Content length: ${content.length}`);
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -226,11 +232,14 @@ export async function copyToClipboardUtil(
   toastFn: ToastFunction,
   contentType: string
 ): Promise<void> {
+  console.log(`[ExportUtils:Copy] Attempting to copy. ContentType: "${contentType}", Text length: ${text.length}`);
   try {
     await navigator.clipboard.writeText(text);
     toastFn({ title: "Copied to Clipboard", description: `${contentType} copied successfully.` });
-  } catch (err) {
-    console.error(`[ExportUtils] Failed to copy ${contentType} to clipboard:`, err);
+    console.log(`[ExportUtils:Copy] Successfully copied: "${contentType}"`);
+  } catch (err: any) {
+    console.error(`[ExportUtils:Copy] FAILED to copy: "${contentType}". Error: ${err.message}`, err);
     toastFn({ variant: "destructive", title: "Copy Failed", description: `Could not copy ${contentType} to clipboard.` });
   }
 }
+

@@ -34,6 +34,7 @@ export default function DataExportControls({
   const { toast } = useToast();
 
   const handleDownload = (format: 'json' | 'text' | 'csv') => {
+    console.log(`[DataExportControls] Download button clicked. Format: "${format}", BaseFilename: "${baseFilename}", Title: "${titleForTextAndCsv}", Data available: ${isAvailable}`);
     if (!data) {
         toast({ variant: "destructive", title: "No Data", description: "No data available to download."});
         return;
@@ -70,6 +71,7 @@ export default function DataExportControls({
   };
 
   const handleCopyToClipboard = async (format: 'json' | 'text' | 'csv') => {
+    console.log(`[DataExportControls] Copy button clicked. Format: "${format}", BaseFilename: "${baseFilename}", Title: "${titleForTextAndCsv}", Data available: ${isAvailable}`);
     if (!data) {
         toast({ variant: "destructive", title: "No Data", description: "No data available to copy."});
         return;
@@ -156,3 +158,4 @@ export default function DataExportControls({
     </div>
   );
 }
+

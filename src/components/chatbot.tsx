@@ -74,7 +74,9 @@ export default function Chatbot() {
         }
       }
       // Clear input only if the submission was successful (no error in chatServerState and an AI message was added)
-      if (!chatServerState.error && latestAiMessage) {
+      const shouldClearInput = !chatServerState.error && !!latestAiMessage;
+      console.log(`[CLIENT:Chatbot:UIEffect] Processing chatServerState update. Error: ${chatServerState.error}. Latest AI message ID (if any): ${latestAiMessage?.id}. Input will be cleared: ${shouldClearInput}`);
+      if (shouldClearInput) {
         setInputValue(''); 
       }
     }
@@ -109,7 +111,9 @@ export default function Chatbot() {
     if (patterns && patterns.text && !patterns.text.includes("pending") && !patterns.text.includes("could not be generated")) {
         summaryParts.push(`Patterns (${patterns.sentiment}): ${patterns.text}`);
     }
-    return summaryParts.length > 0 ? summaryParts.join('\n') : undefined;
+    const result = summaryParts.length > 0 ? summaryParts.join('\n') : undefined;
+    console.log(`[CLIENT:Chatbot:ContextPrep] constructAnalysisSummary called. Analysis available: ${!!currentAnalysis}. Summary (first 100 chars): "${result ? result.substring(0, 100) + '...' : 'undefined'}"`);
+    return result;
   };
 
   const doSubmitFormData = (formData: FormData) => {
@@ -295,3 +299,4 @@ export default function Chatbot() {
     </Card>
   );
 }
+

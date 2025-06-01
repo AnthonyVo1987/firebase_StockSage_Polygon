@@ -102,7 +102,7 @@ function StockAnalysisPageContent() {
       logAndAccumulate(stockAnalysisServerState.analysisUsageReport, 'Analysis Data');
 
       if (stockAnalysisServerState.error && !stockAnalysisServerState.fieldErrors) {
-        console.error('[CLIENT:StockPageContent] Analysis Error (from server state):', stockAnalysisServerState.error);
+        console.error('[CLIENT:StockPageContent:ErrorState] Detailed server error encountered:', stockAnalysisServerState.error, 'Full state for context:', stockAnalysisServerState);
         toast({ variant: "destructive", title: "Analysis Error", description: stockAnalysisServerState.error });
       }
       if (stockAnalysisServerState.fieldErrors?.ticker) {
@@ -186,9 +186,12 @@ function StockAnalysisPageContent() {
 
   let displayStockJson = '';
   if (stockAnalysisServerState?.stockJson) {
+    console.log(`[CLIENT:StockPageContent:DisplayJSON] Attempting to parse stockJson for display. Length: ${stockAnalysisServerState.stockJson.length}`);
     try {
       displayStockJson = JSON.stringify(JSON.parse(stockAnalysisServerState.stockJson), null, 2);
-    } catch (e) {
+      console.log(`[CLIENT:StockPageContent:DisplayJSON] Successfully parsed stockJson for display. Output length: ${displayStockJson.length}`);
+    } catch (e: any) {
+      console.error(`[CLIENT:StockPageContent:DisplayJSON] ERROR parsing stockJson for display. Using raw string. Error: ${e.message}`);
       displayStockJson = stockAnalysisServerState.stockJson; 
     }
   }
@@ -400,3 +403,4 @@ export default function StockAnalysisPage() {
     </StockAnalysisProvider>
   );
 }
+
