@@ -50,8 +50,17 @@ export default function Chatbot() {
   useEffect(() => {
     if (chatServerState?.timestamp && chatServerState.timestamp !== (latestChatStateTimestamp.current ?? 0) ) {
       latestChatStateTimestamp.current = chatServerState.timestamp;
-      console.log('[CLIENT:Chatbot] New chatServerState received from context:', JSON.stringify(chatServerState, null, 2));
-
+      
+      console.log(
+        '[CLIENT_RESPONSE] Action: handleChatSubmit, Received State:',
+        {
+          messagesCount: chatServerState.messages.length,
+          error: chatServerState.error,
+          latestAiUsageReportPresent: !!chatServerState.latestAiUsageReport,
+          timestamp: chatServerState.timestamp,
+        }
+      );
+      
       const latestAiMessage = chatServerState.messages.filter(m => m.sender === 'ai' && !m.isError).pop();
       if (latestAiMessage?.usageReport) {
           updateCumulativeStats(latestAiMessage.usageReport);
@@ -128,6 +137,7 @@ export default function Chatbot() {
     }
     const formData = new FormData(event.currentTarget);
     // inputValue is already set on formData by the Textarea's name prop
+    console.log('[CLIENT:Chatbot] Chat form submission triggered for user input.');
     doSubmitFormData(formData);
   };
 
@@ -135,6 +145,7 @@ export default function Chatbot() {
     setInputValue(promptText); 
     const formData = new FormData(); // Create new FormData for example prompts
     formData.set('userPrompt', promptText);
+    console.log('[CLIENT:Chatbot] Chat form submission triggered for example prompt:', promptText);
     doSubmitFormData(formData);
   };
 
@@ -284,4 +295,3 @@ export default function Chatbot() {
     </Card>
   );
 }
-

@@ -93,12 +93,36 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
   };
 
   const submitStockAnalysisForm = (formData: FormData) => {
-    console.log('[CONTEXT] Submitting stock analysis form via context.');
+    const ticker = formData.get('ticker') as string | null;
+    const dataSource = formData.get('dataSource') as string | null;
+    const analysisMode = formData.get('analysisMode') as string | null; // This one is from the button's value
+    
+    console.log(
+      '[CLIENT_REQUEST] Action: handleAnalyzeStock, Payload:', 
+      { 
+        ticker: ticker?.trim() || "NVDA", 
+        dataSource, 
+        analysisMode 
+      }
+    );
     submitStockAnalysisFormAction(formData);
   };
 
   const submitChatForm = (formData: FormData) => {
-    console.log('[CONTEXT] Submitting chat form via context.');
+    const userPrompt = formData.get('userPrompt') as string | null;
+    const stockJsonPresent = !!formData.get('stockJson');
+    const analysisSummaryPresent = !!formData.get('analysisSummary');
+    const chatHistoryPresent = !!formData.get('chatHistory');
+
+    console.log(
+      '[CLIENT_REQUEST] Action: handleChatSubmit, Payload:',
+      {
+        userPrompt,
+        stockJsonPresent,
+        analysisSummaryPresent,
+        chatHistoryPresent,
+      }
+    );
     submitChatFormAction(formData);
   };
 

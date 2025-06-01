@@ -60,10 +60,21 @@ function StockAnalysisPageContent() {
   const latestStateTimestamp = useRef<number | undefined>();
 
   useEffect(() => {
-    console.log('[CLIENT:StockPageContent] useEffect for stockAnalysisServerState. Timestamp:', stockAnalysisServerState?.timestamp, 'Latest processed:', latestStateTimestamp.current, 'Current `analysisAttemptMade`:', analysisAttemptMade);
-
     if (stockAnalysisServerState?.timestamp && stockAnalysisServerState.timestamp !== latestStateTimestamp.current) {
       latestStateTimestamp.current = stockAnalysisServerState.timestamp;
+      
+      console.log(
+        '[CLIENT_RESPONSE] Action: handleAnalyzeStock, Received State:',
+        {
+          error: stockAnalysisServerState.error,
+          fieldErrors: stockAnalysisServerState.fieldErrors,
+          stockJsonPresent: !!stockAnalysisServerState.stockJson,
+          analysisPresent: !!stockAnalysisServerState.analysis,
+          fetchUsageReportPresent: !!stockAnalysisServerState.fetchUsageReport,
+          analysisUsageReportPresent: !!stockAnalysisServerState.analysisUsageReport,
+          timestamp: stockAnalysisServerState.timestamp,
+        }
+      );
 
       const isErrorState = !!(stockAnalysisServerState.error && !stockAnalysisServerState.fieldErrors);
       const hasData = !!stockAnalysisServerState.stockJson;
@@ -71,12 +82,9 @@ function StockAnalysisPageContent() {
       const hasFieldErrors = !!stockAnalysisServerState.fieldErrors;
 
       if (isErrorState || hasData || hasUsageReports || hasFieldErrors) {
-        // Any of these conditions mean an analysis attempt was made and processed by the server.
         console.log('[CLIENT:StockPageContent] Actual analysis response/error received. Setting analysisAttemptMade to true.');
         setAnalysisAttemptMade(true);
       }
-      // IMPORTANT: No 'else' branch that sets analysisAttemptMade to false here,
-      // because we want it to persist true once an attempt is made, until a new form submission.
 
       const logAndAccumulate = (report: UsageReport | undefined, reportName: string) => {
         if (report) {
@@ -202,10 +210,7 @@ function StockAnalysisPageContent() {
           </CardHeader>
           <CardContent className="space-y-6">
             <form action={(formData) => {
-                // When a new analysis starts, we can consider the "attempt" made,
-                // but the useEffect will more accurately set it based on server response.
-                // For now, we don't set analysisAttemptMade to false here to avoid flicker if the state updates fast.
-                console.log('[CLIENT:StockPageContent] Form submitted.');
+                console.log('[CLIENT:StockPageContent] Stock analysis form submission triggered.');
                 submitStockAnalysisForm(formData);
               }} 
               ref={formRef} 

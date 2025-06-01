@@ -1,62 +1,35 @@
 
-[v1.2.5] [Refactor] Phase 2 Tasks: Data Abstraction, Context State, Export & Prompts
+[v1.2.6] [Feature] Enhanced Client-Side Debug Logging for Server Actions
 
 Details:
-This commit completes a significant refactoring phase (Phase 2, Tasks 3, 4, and 5) aimed at improving the application's modularity, state management, and code organization.
-Firebase commit #b9b57573
+This commit introduces enhanced client-side debug logging to provide better visibility into the request and response cycles of server actions. The goal is to aid in debugging client-server interactions directly from the browser's debug console, mimicking the style and informational content of server-side library logs where applicable for these interaction points.
 
 Key Changes:
 
-**1. Task 3: Data Source Abstraction Layer**
-    *   Introduced a data source abstraction layer (`src/services/data-sources/`) to decouple core logic from specific data provider implementations (Polygon.io, AI-generated mock, AI-powered search).
-    *   Defined an `IDataSourceAdapter` interface and common types in `src/services/data-sources/types.ts`.
-    *   Implemented adapters for Polygon (`polygon-adapter.ts`), AI-driven mock data (`mock-adapter.ts`), and AI-driven search-based data (`ai-search-adapter.ts`).
-    *   Refactored `analyze-stock-server-action.ts` to use the new `fetchStockDataFromSource` service.
-    *   Enhanced the `fetch-stock-data.ts` Genkit flow and its schema (`stock-fetch-schemas.ts`) to ensure `marketStatus` is a mandatory part of `StockDataJson` for consistency.
-    *   The old `polygon-service.ts` has been emptied and is now obsolete.
+1.  **Client Request Logging:**
+    *   **`src/contexts/stock-analysis-context.tsx`**:
+        *   Added `console.log` statements with a `[CLIENT_REQUEST]` prefix within the `submitStockAnalysisForm` and `submitChatForm` wrapper functions.
+        *   These logs capture the name of the server action being called and a structured summary of the payload (e.g., ticker, data source for stock analysis; user prompt, context presence for chat) before the action is invoked.
 
-**2. Task 4: UI State Management - Introduce React Context**
-    *   Implemented a React Context (`src/contexts/stock-analysis-context.tsx`) to manage global UI state related to stock analysis and chatbot interactions.
-    *   The context uses `useActionState` for server actions (`handleAnalyzeStock`, `handleChatSubmit`), centralizing state updates and pending flags.
-    *   It also manages cumulative AI usage statistics.
-    *   Refactored `stock-analysis-page.tsx` and `chatbot.tsx` to consume state and actions from this new context, eliminating prop drilling and improving component decoupling.
-    *   Improved initial page load behavior to prevent premature display of "pending" messages in the AI Key Takeaways section.
-
-**3. Task 5: Refactor Data Export Logic & Centralize Chatbot Prompts**
-    *   **Task 5.1: Extract Data Export Logic & Utilities**
-        *   Created `src/lib/export-utils.ts` to house all core utility functions for data formatting (JSON, Text, CSV), file downloading, clipboard copying, and helper functions (e.g., timestamp generation, CSV field escaping).
-        *   Introduced a reusable `DataExportControls` component (`src/components/data-export-controls.tsx`) to render standardized export/copy buttons, utilizing the new utilities.
-        *   Refactored `stock-analysis-page.tsx` to use the `DataExportControls` component, significantly cleaning up the page component by removing repetitive export logic.
-    *   **Task 5.2: Centralize Chatbot Example Prompts**
-        *   Created `src/ai/schemas/chat-prompts.ts` to define and store the `ExamplePrompt` interface and the `examplePrompts` array.
-        *   Refactored `chatbot.tsx` to import and use these centralized prompts, removing the internal definition.
-        *   Updated the chat response download functionality in `chatbot.tsx` to save files as `.md` (Markdown) with the correct MIME type.
+2.  **Client Response Logging:**
+    *   **`src/components/stock-analysis-page.tsx`**:
+        *   Enhanced the `useEffect` hook that processes `stockAnalysisServerState`.
+        *   Added a `console.log` statement with a `[CLIENT_RESPONSE]` prefix to summarize the state received from the `handleAnalyzeStock` server action (e.g., presence of stock JSON, analysis, errors, usage reports, timestamp).
+    *   **`src/components/chatbot.tsx`**:
+        *   Enhanced the `useEffect` hook that processes `chatServerState`.
+        *   Added a `console.log` statement with a `[CLIENT_RESPONSE]` prefix to summarize the state received from the `handleChatSubmit` server action (e.g., message count, presence of AI usage reports, errors, timestamp).
 
 Benefits:
-*   Enhanced modularity and maintainability across data fetching, state management, and UI components.
-*   Improved code organization and separation of concerns.
-*   Easier to add new data sources or AI models in the future.
-*   More robust and cleaner UI state handling.
+*   **Improved Debuggability:** Provides developers with a clear trace of data being sent to server actions and the corresponding data/state being returned to the client.
+*   **Faster Iteration:** Reduces the need to solely rely on server-side logs for understanding client-server communication flow, allowing for quicker identification of issues related to data passing or state updates.
+*   **Consistent Logging Style:** Uses standardized `[CLIENT_REQUEST]` and `[CLIENT_RESPONSE]` prefixes for easy identification in the `DebugConsole`.
+
+These logs are captured by the existing `DebugConsole` component, making them readily accessible during development.
 
 File Manifest:
 
-Added Files:
-*   `src/services/data-sources/types.ts`
-*   `src/services/data-sources/adapters/polygon-adapter.ts`
-*   `src/services/data-sources/adapters/mock-adapter.ts`
-*   `src/services/data-sources/adapters/ai-search-adapter.ts`
-*   `src/services/data-sources/index.ts`
-*   `src/contexts/stock-analysis-context.tsx`
-*   `src/lib/export-utils.ts`
-*   `src/components/data-export-controls.tsx`
-*   `src/ai/schemas/chat-prompts.ts`
-
 Modified Files:
-*   `src/actions/analyze-stock-server-action.ts`
-*   `src/ai/schemas/stock-fetch-schemas.ts`
-*   `src/ai/flows/fetch-stock-data.ts`
+*   `src/contexts/stock-analysis-context.tsx`
 *   `src/components/stock-analysis-page.tsx`
 *   `src/components/chatbot.tsx`
-
-Deleted Files (or Emptied for Deletion):
-*   `src/services/polygon-service.ts` (Content was emptied; file should be removed from version control if not already.)
+*   `git_commit_msg.md` (Updated with this commit message)
