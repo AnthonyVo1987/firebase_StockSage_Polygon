@@ -18,7 +18,7 @@ export const examplePrompts: ExamplePrompt[] = [
   { 
     id: 'ex_options_takeaways', 
     label: "Options Trader's Key Takeaways (Uses Provided Data)", 
-    promptText: "Given the provided stock JSON data and AI analysis summary, what are the key considerations for an options trader? Discuss potential volatility implications, upcoming catalysts if known, and how the current trend might influence options strategies (e.g., bullish, bearish, neutral plays)." 
+    promptText: "Given the provided stock JSON data and AI analysis summary, what are the key considerations for an options trader? Discuss potential volatility implications and how the current trend might influence options strategies (e.g., bullish, bearish, neutral plays)." 
   },
   { 
     id: 'ex_additional_analysis', 

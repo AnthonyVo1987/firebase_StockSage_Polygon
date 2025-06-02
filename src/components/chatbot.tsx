@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect, startTransition } from 'react';
 import type { ChatMessage } from '@/ai/schemas/chat-schemas';
-import { examplePrompts } from '@/ai/schemas/chat-prompts'; // Import centralized prompts
+import { examplePrompts } from '@/ai/schemas/chat-prompts'; 
 import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +15,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm'; 
 import { useStockAnalysisContext } from '@/contexts/stock-analysis-context';
 import { downloadFile, copyToClipboardUtil, getCurrentTimestampForFile, formatJsonForExport } from '@/lib/export-utils';
+import { formatTimestampToPacificTime } from '@/lib/date-utils';
 
 
 function SubmitChatButtonInternal() {
@@ -29,7 +30,8 @@ function SubmitChatButtonInternal() {
 
 export default function Chatbot() {
   const {
-    stockAnalysisServerState,
+    combinedServerState, // Use combinedServerState directly
+    aiAnalysisResultState, // Use aiAnalysisResultState for tickerAnalyzed
     chatServerState,
     submitChatForm,
     chatFormPending,
@@ -63,7 +65,7 @@ export default function Chatbot() {
       
       const latestAiMessage = chatServerState.messages.filter(m => m.sender === 'ai' && !m.isError).pop();
       if (latestAiMessage?.usageReport) {
-          updateCumulativeStats(latestAiMessage.usageReport);
+          updateCumulativeStats(latestAiMessage.usageReport, 'chat');
           toast({ title: "AI Responded", description: `Chatbot provided a response. Cost: $${latestAiMessage.usageReport.cost.toFixed(6)}` });
       }
 
@@ -73,7 +75,7 @@ export default function Chatbot() {
             toast({ variant: "destructive", title: "Chatbot Error", description: chatServerState.error });
         }
       }
-      // Clear input only if the submission was successful (no error in chatServerState and an AI message was added)
+      
       const shouldClearInput = !chatServerState.error && !!latestAiMessage;
       console.log(`[CLIENT:Chatbot:UIEffect] Processing chatServerState update. Error: ${chatServerState.error}. Latest AI message ID (if any): ${latestAiMessage?.id}. Input will be cleared: ${shouldClearInput}`);
       if (shouldClearInput) {
@@ -91,8 +93,11 @@ export default function Chatbot() {
     }
   }, [chatServerState?.messages]);
 
-  const constructAnalysisSummary = (currentAnalysis?: AnalyzeStockDataOutput): string | undefined => {
-    if (!currentAnalysis) return undefined;
+  const constructAnalysisSummary = (currentAnalysis?: AnalyzeStockDataOutput, currentTicker?: string): string | undefined => {
+    if (!currentAnalysis || !currentTicker || aiAnalysisResultState.tickerAnalyzed !== currentTicker || combinedServerState.analysisStatus !== 'analysis_complete') {
+        console.log(`[CLIENT:Chatbot:ContextPrep] constructAnalysisSummary called. Analysis for ${currentTicker} not ready or stale. Analysis Status: ${combinedServerState.analysisStatus}, Analyzed Ticker: ${aiAnalysisResultState.tickerAnalyzed}`);
+        return undefined;
+    }
     let summaryParts: string[] = [];
     const { stockPriceAction, trend, volatility, momentum, patterns } = currentAnalysis;
 
@@ -112,16 +117,25 @@ export default function Chatbot() {
         summaryParts.push(`Patterns (${patterns.sentiment}): ${patterns.text}`);
     }
     const result = summaryParts.length > 0 ? summaryParts.join('\n') : undefined;
-    console.log(`[CLIENT:Chatbot:ContextPrep] constructAnalysisSummary called. Analysis available: ${!!currentAnalysis}. Summary (first 100 chars): "${result ? result.substring(0, 100) + '...' : 'undefined'}"`);
+    console.log(`[CLIENT:Chatbot:ContextPrep] constructAnalysisSummary called for ${currentTicker}. Summary (first 100 chars): "${result ? result.substring(0, 100) + '...' : 'undefined'}"`);
     return result;
   };
 
   const doSubmitFormData = (formData: FormData) => {
-    if (stockAnalysisServerState?.stockJson) {
-        formData.set('stockJson', stockAnalysisServerState.stockJson);
+    if (combinedServerState?.stockJson && combinedServerState.tickerUsed) {
+        try {
+            const parsedJson = JSON.parse(combinedServerState.stockJson);
+            if (parsedJson.stockSnapshot?.ticker === combinedServerState.tickerUsed) {
+                formData.set('stockJson', combinedServerState.stockJson);
+            } else {
+                console.warn(`[CLIENT:Chatbot:ContextPrep] Stock JSON ticker (${parsedJson.stockSnapshot?.ticker}) does not match context ticker (${combinedServerState.tickerUsed}). Not sending stockJson.`);
+            }
+        } catch (e) {
+            console.error("[CLIENT:Chatbot:ContextPrep] Error parsing stockJson for chat context:", e);
+        }
     }
     
-    const analysisSummary = constructAnalysisSummary(stockAnalysisServerState?.analysis);
+    const analysisSummary = constructAnalysisSummary(combinedServerState?.analysis, combinedServerState?.tickerUsed);
     if (analysisSummary) {
         formData.set('analysisSummary', analysisSummary);
     }
@@ -140,23 +154,23 @@ export default function Chatbot() {
         return;
     }
     const formData = new FormData(event.currentTarget);
-    // inputValue is already set on formData by the Textarea's name prop
+    
     console.log('[CLIENT:Chatbot] Chat form submission triggered for user input.');
     doSubmitFormData(formData);
   };
 
   const handleExamplePromptClick = (promptText: string) => {
     setInputValue(promptText); 
-    const formData = new FormData(); // Create new FormData for example prompts
+    const formData = new FormData(); 
     formData.set('userPrompt', promptText);
     console.log('[CLIENT:Chatbot] Chat form submission triggered for example prompt:', promptText);
     doSubmitFormData(formData);
   };
 
   const handleDownloadChatResponse = (contentToDownload: string | object) => {
-    const ticker = stockAnalysisServerState?.stockJson ? (JSON.parse(stockAnalysisServerState.stockJson)?.stockQuote?.ticker || 'AI_CHAT') : 'AI_CHAT';
+    const ticker = combinedServerState?.tickerUsed || 'AI_CHAT';
     const timestamp = getCurrentTimestampForFile();
-    const filename = `ai-chat-response_${ticker}_${timestamp}.md`; // Changed to .md for markdown content
+    const filename = `ai-chat-response_${ticker}_${timestamp}.md`; 
     const dataString = typeof contentToDownload === 'string' ? contentToDownload : formatJsonForExport(contentToDownload);
     downloadFile(dataString, filename, 'text/markdown;charset=utf-8;');
     toast({ title: "Download Started", description: `${filename} is downloading.` });
@@ -170,17 +184,28 @@ export default function Chatbot() {
 
   const messagesToDisplay = chatServerState?.messages || [];
   const latestAiMessageForControls = messagesToDisplay.filter(m => m.sender === 'ai' && !m.isError).pop();
-  const stockJsonAvailable = !!stockAnalysisServerState?.stockJson;
   
-  const analysisAvailable = !!stockAnalysisServerState?.analysis && 
-    !Object.values(stockAnalysisServerState.analysis).some(takeaway => 
-      takeaway.text.includes("pending") || takeaway.text.includes("could not be generated")
+  let stockJsonCurrentlyAvailable = false;
+  if (combinedServerState?.stockJson && combinedServerState.tickerUsed) {
+      try {
+          const parsed = JSON.parse(combinedServerState.stockJson);
+          if (parsed.stockSnapshot?.ticker === combinedServerState.tickerUsed) {
+              stockJsonCurrentlyAvailable = true;
+          }
+      } catch (e) { /* ignore parsing error for this check */ }
+  }
+
+  const analysisCurrentlyAvailable = 
+    combinedServerState.analysisStatus === 'analysis_complete' &&
+    !!combinedServerState.analysis &&
+    aiAnalysisResultState.tickerAnalyzed === combinedServerState.tickerUsed &&
+    !Object.values(combinedServerState.analysis).some(takeaway =>
+        takeaway.text.includes("pending") || takeaway.text.includes("could not be generated")
     );
 
-  const examplePromptsDisabled = chatFormPending || (!stockJsonAvailable && !analysisAvailable);
+  const examplePromptsDisabled = chatFormPending || !stockJsonCurrentlyAvailable || !analysisCurrentlyAvailable;
 
-
-  console.log('[CLIENT:Chatbot] Render. Input value:', inputValue, 'Is expanded:', isInputExpanded, 'Messages count:', messagesToDisplay.length, 'Form pending:', chatFormPending, 'StockJSON available:', stockJsonAvailable, 'Analysis available:', analysisAvailable);
+  console.log(`[CLIENT:Chatbot] Render. Input: "${inputValue}", ChatPending: ${chatFormPending}, ContextTicker: "${combinedServerState.tickerUsed}", StockJSONAvail: ${stockJsonCurrentlyAvailable}, AnalysisAvail: ${analysisCurrentlyAvailable}, PromptsDisabled: ${examplePromptsDisabled}, AnalysisStatus: ${combinedServerState.analysisStatus}, AnalysisResultTicker: ${aiAnalysisResultState.tickerAnalyzed}`);
 
   return (
     <Card className="mt-8 w-full max-w-4xl mx-auto shadow-xl">
@@ -221,7 +246,7 @@ export default function Chatbot() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground/70 mt-1">
-                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatTimestampToPacificTime(msg.timestamp)}
                 </p>
               </div>
             ))}
@@ -283,7 +308,7 @@ export default function Chatbot() {
               </Button>
             ))}
         </div>
-        {(!stockJsonAvailable || !analysisAvailable) && <p className="text-xs text-muted-foreground mt-1">Tip: Analyze a stock first to enable prompt examples that use context.</p>}
+        {(!stockJsonCurrentlyAvailable || !analysisCurrentlyAvailable) && <p className="text-xs text-muted-foreground mt-1">Tip: Analyze a stock first to enable prompt examples that use context.</p>}
       </CardFooter>
        {latestAiMessageForControls && (
         <div className="p-4 pt-0 border-t mt-0 flex items-center gap-2">
@@ -300,3 +325,5 @@ export default function Chatbot() {
   );
 }
 
+
+    

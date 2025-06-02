@@ -1,4 +1,3 @@
-
 /**
  * @fileOverview Zod schemas and TypeScript types for the web search tool.
  */
@@ -9,12 +8,6 @@ export const WebSearchInputSchema = z.object({
 });
 export type WebSearchInput = z.infer<typeof WebSearchInputSchema>;
 
-export const WebSearchOutputSchema = z.object({
-  results: z.array(z.object({
-    title: z.string().describe('The title of the search result.'),
-    link: z.string().url().describe('The URL of the search result.'),
-    snippet: z.string().describe('A brief snippet from the search result.'),
-  })).describe('An array of search results, or an empty array if no relevant results are found or if the search is too broad for this mock tool.'),
-  summary: z.string().optional().describe('A brief summary of the overall search findings, if applicable.'),
-});
+// Changed from a complex object to a simple string
+export const WebSearchOutputSchema = z.string().describe("A formatted string summarizing the web search results, including key findings and relevant links if any. If no specific results, a message indicating that.");
 export type WebSearchOutput = z.infer<typeof WebSearchOutputSchema>;

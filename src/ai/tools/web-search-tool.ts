@@ -1,4 +1,3 @@
-
 /**
  * @fileOverview A mock web search tool for the AI chatbot.
  */
@@ -8,22 +7,50 @@ import {
   WebSearchInputSchema, 
   type WebSearchInput, 
   WebSearchOutputSchema, 
-  type WebSearchOutput 
-} from '@/ai/schemas/web-search-schemas'; // Updated import
+  // WebSearchOutput is now a string, but we can keep internal structure for mocking
+} from '@/ai/schemas/web-search-schemas';
+
+// Define an internal type for structured mock results if needed
+interface MockSearchResult {
+  title: string;
+  link: string;
+  snippet: string;
+}
+interface MockSearchResponse {
+  results: MockSearchResult[];
+  summary?: string;
+}
+
+function formatResponseToString(response: MockSearchResponse): string {
+  if (!response.results || response.results.length === 0) {
+    return response.summary || "No specific mock results found for the query.";
+  }
+
+  let outputString = "";
+  if (response.summary) {
+    outputString += `Summary: ${response.summary}\n\n`;
+  }
+  outputString += "Results:\n";
+  response.results.forEach((result, index) => {
+    outputString += `${index + 1}. ${result.title}\n   Snippet: ${result.snippet}\n   Link: ${result.link}\n`;
+  });
+  return outputString.trim();
+}
 
 export const webSearchTool = ai.defineTool(
   {
     name: 'webSearchTool',
     description: 'Performs a web search for topics related to stocks, options, ETFs, market sentiments, investing, trading, finances, or the economy. Use this to find current information, news, or general knowledge on these topics. Be specific with your query.',
     inputSchema: WebSearchInputSchema,
-    outputSchema: WebSearchOutputSchema,
+    outputSchema: WebSearchOutputSchema, // Now expects a string
   },
-  async (input: WebSearchInput): Promise<WebSearchOutput> => {
+  async (input: WebSearchInput): Promise<string> => { // Return type is now string
     console.log(`Mock Web Search Tool: Received query - "${input.query}"`);
-    // Simulate a web search with mock data
-    // This is a very basic mock. In a real scenario, this would call a search API.
+    
+    let mockResponse: MockSearchResponse = { results: [] };
+
     if (input.query.toLowerCase().includes('nvda price target')) {
-      return {
+      mockResponse = {
         results: [
           {
             title: 'Analysts Bullish on NVDA: New Price Targets Emerge',
@@ -38,9 +65,8 @@ export const webSearchTool = ai.defineTool(
         ],
         summary: 'Recent analyst updates suggest a positive outlook for NVDA, with price targets generally ranging from $90 to $150, averaging around $125-$130.'
       };
-    }
-    if (input.query.toLowerCase().includes('market sentiment today')) {
-        return {
+    } else if (input.query.toLowerCase().includes('market sentiment today')) {
+        mockResponse = {
             results: [
                 {
                     title: 'Market Wrap: Stocks Mixed Amid Inflation Jitters - MockFinance',
@@ -49,10 +75,9 @@ export const webSearchTool = ai.defineTool(
                 }
             ],
             summary: 'Today\'s market sentiment appears cautious and mixed, influenced by recent inflation data.'
-        }
-    }
-     if (input.query.toLowerCase().includes('what are call options')) {
-        return {
+        };
+    } else if (input.query.toLowerCase().includes('what are call options')) {
+        mockResponse = {
             results: [
                 {
                     title: 'Call Option Explained: Definition, How It Works, Examples - Investopedia Mock',
@@ -61,28 +86,27 @@ export const webSearchTool = ai.defineTool(
                 }
             ],
             summary: 'A call option provides the right to buy an asset at a set price by a certain date.'
-        }
-    }
-
-    // Generic fallback for other queries within scope
-    const relatedKeywords = ["stock", "option", "etf", "market", "invest", "trading", "finance", "economic", "company", "sec"];
-    if (relatedKeywords.some(kw => input.query.toLowerCase().includes(kw))) {
-        return {
-            results: [
-                {
-                    title: `Mock Search Result for "${input.query}"`,
-                    link: `https://mocksearch.example.com/search?q=${encodeURIComponent(input.query)}`,
-                    snippet: `This is a simulated search result for your query about ${input.query}. In a real application, this would contain relevant information from the web.`
-                }
-            ],
-            summary: `Mock search results for "${input.query}" indicate it's a topic that can be explored further.`
         };
+    } else {
+      const relatedKeywords = ["stock", "option", "etf", "market", "invest", "trading", "finance", "economic", "company", "sec"];
+      if (relatedKeywords.some(kw => input.query.toLowerCase().includes(kw))) {
+          mockResponse = {
+              results: [
+                  {
+                      title: `Mock Search Result for "${input.query}"`,
+                      link: `https://mocksearch.example.com/search?q=${encodeURIComponent(input.query)}`,
+                      snippet: `This is a simulated search result for your query about ${input.query}. In a real application, this would contain relevant information from the web.`
+                  }
+              ],
+              summary: `Mock search results for "${input.query}" indicate it's a topic that can be explored further.`
+          };
+      } else {
+        mockResponse = {
+          results: [],
+          summary: `No specific mock results found for "${input.query}". Try a more specific financial query.`
+        };
+      }
     }
-
-    // If the query is too generic or seems out of mock scope
-    return {
-      results: [],
-      summary: `No specific mock results found for "${input.query}". Try a more specific financial query.`
-    };
+    return formatResponseToString(mockResponse);
   }
 );

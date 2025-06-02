@@ -14,9 +14,10 @@ import {
   AnalyzeStockDataOutputSchema, 
   AnalyzeStockDataFlowOutputSchema, 
   type AnalyzeStockDataFlowOutput,
-  type SingleTakeaway // Import for default error values
+  type SingleTakeaway 
 } from '@/ai/schemas/stock-analysis-schemas';
 import { DISABLED_BY_CONFIG_TEXT } from '@/ai/schemas/stock-fetch-schemas';
+import { formatTimestampToPacificTime } from '@/lib/date-utils';
 
 
 export async function analyzeStockData(input: AnalyzeStockDataInput): Promise<AnalyzeStockDataFlowOutput> {
@@ -32,39 +33,53 @@ const prompt = ai.definePrompt({
   output: {schema: AnalyzeStockDataOutputSchema},
   prompt: `You are an expert financial analyst specializing in technical analysis.
 
-You will analyze the provided stock data, which is a JSON string containing 'marketStatus', 'stockQuote', and 'technicalAnalysis' sections.
-Your primary context is the 'marketStatus' section, especially its 'serverTime' and 'market' (e.g., "regular", "closed") fields. Use this to frame your analysis.
+You will analyze the provided stock data, which is a JSON string. This JSON contains:
+- 'marketStatus': Current market conditions. 'marketStatus.serverTime' (in Pacific Time hh:mm:ss AM/PM format) indicates the current server time.
+- 'stockSnapshot': Contains current day's intraday data ('day' object with OHLCV, VWAP; 'min' object with last minute data, 'updated' timestamp in PT format) AND previous day's aggregate data ('stockSnapshot.prevDay' object with OHLCV, VWAP). 'stockSnapshot.todaysChangePerc', 'stockSnapshot.todaysChange' are also key fields.
+- 'technicalAnalysis': Standard TA indicators (RSI, EMA, SMA, MACD) and VWAP (from 'technicalAnalysis.vwap.day' and 'technicalAnalysis.vwap.minute').
+
+Your primary context for current day analysis is 'stockSnapshot.day', 'stockSnapshot.min', 'stockSnapshot.todaysChangePerc', and 'stockSnapshot.updated' timestamp (Pacific Time).
+For previous day's context, use 'stockSnapshot.prevDay.c' (previous day's close).
 
 Based on this comprehensive data, you MUST provide concise, single-bullet-point takeaways for each of the following five areas.
 For EACH takeaway, you MUST also determine its overall sentiment: "bullish", "bearish", or "neutral".
 
-1.  **Stock Price Action**: Analyze the 'stockQuote' section (price, change, day high/low) in the context of the 'marketStatus'. Determine sentiment.
-2.  **Trend**: Analyze relevant Technical Analysis Indicators (EMAs, SMAs, MACD) from the 'technicalAnalysis' section to determine the current trend (e.g., bullish, bearish, sideways), considering the market status. Determine sentiment.
-3.  **Volatility**: Analyze relevant indicators (e.g., price range from quote, or relationship between short/long term MAs if applicable) to comment on current volatility. Determine sentiment.
-4.  **Momentum**: Analyze relevant Technical Analysis Indicators (RSI, MACD histogram) from the 'technicalAnalysis' section to assess momentum. Determine sentiment.
-5.  **Patterns**: Briefly note if any obvious chart patterns are suggested by the MAs or price action (e.g., "MAs converging suggesting potential crossover" or "Price testing short-term MA"). If none are apparent, state "No clear patterns observed from provided data." Determine sentiment.
+**VERY IMPORTANT INSTRUCTION**:
+ABSOLUTELY DO NOT use any of the five takeaway slots to discuss:
+    - Generic implications of the market being open or closed.
+    - General advice about after-hours trading.
+    - Generic warnings to monitor news after market close or that price may change in extended hours.
+    - Upcoming catalysts or external news/events UNLESS direct evidence or data for such events is present within the provided JSON 'stockSnapshot' or 'technicalAnalysis' sections.
+The user is fully aware of the market's current status via the 'marketStatus.serverTime' and 'stockSnapshot.updated' fields.
+Your five takeaways MUST focus exclusively on specific, actionable insights derived DIRECTLY from the provided numerical data (prices, volumes, indicator values, VWAP values, % changes, price ranges). Avoid vague statements.
 
-Stock Data (JSON String with marketStatus, stockQuote and technicalAnalysis sections):
+1.  **Stock Price Action**: Analyze the current day's data from 'stockSnapshot.day' (price using 'day.c' or 'min.c' if appropriate, 'todaysChange', 'todaysChangePerc', 'day.o,h,l,c', and 'day.vw'). Compare with 'stockSnapshot.prevDay.c' (previous day's close) for context. Determine sentiment.
+2.  **Trend**: Analyze relevant Technical Analysis Indicators ('technicalAnalysis.ema', '.sma', '.macd') and VWAP (from 'technicalAnalysis.vwap.day', which is 'stockSnapshot.day.vw') to determine the current trend (e.g., bullish, bearish, sideways), considering 'stockSnapshot.prevDay' data for broader context if needed. Determine sentiment.
+3.  **Volatility**: Analyze the price range from 'stockSnapshot.day.h' and 'stockSnapshot.day.l', or relationship between short/long term MAs if applicable, to comment on current volatility. Compare with 'stockSnapshot.prevDay' ranges if useful. Determine sentiment.
+4.  **Momentum**: Analyze relevant Technical Analysis Indicators ('technicalAnalysis.rsi', '.macd.histogram') from the 'technicalAnalysis' section to assess momentum. Relate to 'stockSnapshot.todaysChangePerc'. Determine sentiment.
+5.  **Patterns**: Briefly note if any obvious chart patterns are suggested by the MAs, VWAP ('technicalAnalysis.vwap.day'), or current price action in 'stockSnapshot' (e.g., "Price testing day's VWAP" or "MAs converging"). Compare with 'stockSnapshot.prevDay' data if useful. If none are apparent, state "No clear patterns observed from provided data." Determine sentiment.
+
+Stock Data (JSON String with marketStatus, stockSnapshot (containing day, min, prevDay), and technicalAnalysis sections. Timestamps 'marketStatus.serverTime' and 'stockSnapshot.updated' are in Pacific Time hh:mm:ss AM/PM format.):
 \`\`\`json
 {{{stockData}}}
 \`\`\`
 
 **Important Note on Data Availability:**
-If you encounter the string "${DISABLED_BY_CONFIG_TEXT}" for any technical indicator value, it means that specific data point was intentionally not requested for this analysis.
-You MUST acknowledge this in your analysis for the relevant takeaway's text. For example, if MACD values are "${DISABLED_BY_CONFIG_TEXT}", state for Trend text: "Trend analysis is limited as MACD data was disabled."
-If an indicator value is 'null', it means data was requested but not available from the source; analyze based on available data and note the missing 'null' point if crucial.
-If 'marketStatus' or 'stockQuote' are missing or incomplete, acknowledge this and indicate that analysis might be limited.
+- If you encounter "${DISABLED_BY_CONFIG_TEXT}" for any TA indicator, acknowledge this (e.g., "Trend analysis limited as MACD was disabled.").
+- If an indicator value is 'null', data was requested but unavailable; analyze based on available data and note the missing 'null' point if crucial.
+- If 'marketStatus', 'stockSnapshot', 'stockSnapshot.day', or 'stockSnapshot.prevDay', or critical fields within them (like 'day.c', 'day.vw', 'prevDay.c') are missing or incomplete, acknowledge this and indicate that analysis might be limited.
+- Focus on 'stockSnapshot.day' and 'stockSnapshot.min' for current day activity and 'stockSnapshot.prevDay' for direct comparison to previous day's official closing state.
 
 Provide your analysis in the structured format defined by the output schema. Each field should be an object containing 'text' (a single, concise bullet point string) and 'sentiment' ("bullish", "bearish", or "neutral").
-Focus on actionable or insightful points. Ensure your analysis reflects the provided 'marketStatus.serverTime' and current market condition (open/closed).
+Focus on actionable or insightful points based directly on the data. Ensure your analysis reflects the provided 'marketStatus.serverTime' and 'stockSnapshot.updated' times (which are Pacific Time).
 
 Example Output Structure (Ensure your output matches this structure exactly):
 {
-  "stockPriceAction": { "text": "- As of [marketStatus.serverTime] (market [marketStatus.market]), price shows [movement] with [details from quote].", "sentiment": "[bullish/bearish/neutral]" },
-  "trend": { "text": "- Trend appears [bullish/bearish/sideways] based on [MA/MACD observations, noting if any were '${DISABLED_BY_CONFIG_TEXT}' or if data is limited by market status].", "sentiment": "[bullish/bearish/neutral]" },
-  "volatility": { "text": "- Volatility appears [high/moderate/low] based on [price range/MA spread, noting if MAs were '${DISABLED_BY_CONFIG_TEXT}'].", "sentiment": "[bullish/bearish/neutral]" },
-  "momentum": { "text": "- Momentum is [strong/waning/neutral] as indicated by RSI [RSI value] and MACD [MACD details, noting if '${DISABLED_BY_CONFIG_TEXT}'].", "sentiment": "[bullish/bearish/neutral]" },
-  "patterns": { "text": "- [Observation on MAs, price action, or 'No clear patterns observed', noting if MAs were '${DISABLED_BY_CONFIG_TEXT}'].", "sentiment": "[bullish/bearish/neutral]" }
+  "stockPriceAction": { "text": "- At [stockSnapshot.updated PT], price is [stockSnapshot.day.c or min.c] showing a [todaysChangePerc] change. Day's VWAP is [stockSnapshot.day.vw]. Previous close was [stockSnapshot.prevDay.c].", "sentiment": "[bullish/bearish/neutral]" },
+  "trend": { "text": "- Trend appears [bullish/bearish/sideways] based on MAs, MACD, and day's VWAP ([technicalAnalysis.vwap.day]).", "sentiment": "[bullish/bearish/neutral]" },
+  "volatility": { "text": "- Volatility appears [high/moderate/low] based on day's range ([stockSnapshot.day.l] - [stockSnapshot.day.h]).", "sentiment": "[bullish/bearish/neutral]" },
+  "momentum": { "text": "- Momentum is [strong/waning/neutral] (RSI [RSI value], MACD histogram [value]), with today's change at [stockSnapshot.todaysChangePerc].", "sentiment": "[bullish/bearish/neutral]" },
+  "patterns": { "text": "- [Observation on MAs, VWAP, price action, or 'No clear patterns observed'].", "sentiment": "[bullish/bearish/neutral]" }
 }
 `,
 });
