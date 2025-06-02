@@ -68,13 +68,61 @@ export const TechnicalAnalysisDataSchema = z.object({
 }).describe("Technical Analysis indicators.");
 export type TechnicalAnalysisData = z.infer<typeof TechnicalAnalysisDataSchema>;
 
+// Schema for Ticker Snapshot Day Data
+export const TickerSnapshotDayDataSchema = z.object({
+  o: z.number().nullable().describe("Open price for the day"),
+  h: z.number().nullable().describe("Highest price for the day"),
+  l: z.number().nullable().describe("Lowest price for the day"),
+  c: z.number().nullable().describe("Close price for the day"),
+  v: z.number().nullable().describe("Trading volume for the day"),
+  vw: z.number().nullable().describe("Volume Weighted Average Price for the day"),
+}).describe("Current trading day's aggregate data.");
+export type TickerSnapshotDayData = z.infer<typeof TickerSnapshotDayDataSchema>;
+
+// Schema for Ticker Snapshot Min Data
+export const TickerSnapshotMinDataSchema = z.object({
+  av: z.number().nullable().describe("Accumulated volume for the minute aggregate"),
+  t: z.number().nullable().describe("Timestamp of the minute aggregate"),
+  n: z.number().nullable().describe("Number of trades in the minute aggregate"),
+  o: z.number().nullable().describe("Open price for the minute aggregate"),
+  h: z.number().nullable().describe("Highest price for the minute aggregate"),
+  l: z.number().nullable().describe("Lowest price for the minute aggregate"),
+  c: z.number().nullable().describe("Close price for the minute aggregate"),
+  v: z.number().nullable().describe("Trading volume for the minute aggregate"),
+  vw: z.number().nullable().describe("Volume Weighted Average Price for the minute aggregate"),
+}).describe("Last minute's aggregate data.");
+export type TickerSnapshotMinData = z.infer<typeof TickerSnapshotMinDataSchema>;
+
+// Schema for Ticker Snapshot Previous Day Data
+export const TickerSnapshotPrevDayDataSchema = z.object({
+  o: z.number().nullable().describe("Open price for the previous day"),
+  h: z.number().nullable().describe("Highest price for the previous day"),
+  l: z.number().nullable().describe("Lowest price for the previous day"),
+  c: z.number().nullable().describe("Close price for the previous day"),
+  v: z.number().nullable().describe("Trading volume for the previous day"),
+  vw: z.number().nullable().describe("Volume Weighted Average Price for the previous day"),
+}).describe("Previous trading day's aggregate data.");
+export type TickerSnapshotPrevDayData = z.infer<typeof TickerSnapshotPrevDayDataSchema>;
+
+// Schema for Ticker Snapshot Data
+export const TickerSnapshotDataSchema = z.object({
+  ticker: z.string().describe("Ticker symbol for the snapshot"),
+  todaysChangePerc: z.number().nullable().describe("Today's percentage change"),
+  todaysChange: z.number().nullable().describe("Today's price change"),
+  updated: z.number().nullable().describe("Timestamp of the last update (Unix ms or ns)"),
+  day: TickerSnapshotDayDataSchema.nullable().describe("Current trading day's aggregate data"),
+  min: TickerSnapshotMinDataSchema.nullable().describe("Last minute's aggregate data"),
+  prevDay: TickerSnapshotPrevDayDataSchema.nullable().describe("Previous trading day's aggregate data"),
+}).describe("Ticker snapshot data including current day, minute, and previous day aggregates.");
+export type TickerSnapshotData = z.infer<typeof TickerSnapshotDataSchema>;
 
 // Main schema for the combined stock data (market status + quote + TA)
 export const StockDataJsonSchema = z.object({
   marketStatus: MarketStatusDataSchema.describe("Current overall market status. This field is MANDATORY."), // No longer optional
   stockQuote: StockQuoteDataSchema.optional(), // Optional because market status might fail before we get this, or AI might not find it
   technicalAnalysis: TechnicalAnalysisDataSchema.optional(), // TA might not always be available or fetched
-}).describe("Combined market status, stock quote, and technical analysis data.");
+  tickerSnapshot: TickerSnapshotDataSchema.optional().describe("Ticker snapshot data including current day, minute, and previous day aggregates."),
+}).describe("Combined market status, stock quote, technical analysis data, and ticker snapshot data.");
 export type StockDataJson = z.infer<typeof StockDataJsonSchema>;
 
 

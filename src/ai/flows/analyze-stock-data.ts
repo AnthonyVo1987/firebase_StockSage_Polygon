@@ -32,19 +32,19 @@ const prompt = ai.definePrompt({
   output: {schema: AnalyzeStockDataOutputSchema},
   prompt: `You are an expert financial analyst specializing in technical analysis.
 
-You will analyze the provided stock data, which is a JSON string containing 'marketStatus', 'stockQuote', and 'technicalAnalysis' sections.
+You will analyze the provided stock data, which is a JSON string containing 'marketStatus', 'stockQuote', 'technicalAnalysis', and a new 'tickerSnapshot' section.
 Your primary context is the 'marketStatus' section, especially its 'serverTime' and 'market' (e.g., "regular", "closed") fields. Use this to frame your analysis.
 
 Based on this comprehensive data, you MUST provide concise, single-bullet-point takeaways for each of the following five areas.
 For EACH takeaway, you MUST also determine its overall sentiment: "bullish", "bearish", or "neutral".
 
-1.  **Stock Price Action**: Analyze the 'stockQuote' section (price, change, day high/low) in the context of the 'marketStatus'. Determine sentiment.
-2.  **Trend**: Analyze relevant Technical Analysis Indicators (EMAs, SMAs, MACD) from the 'technicalAnalysis' section to determine the current trend (e.g., bullish, bearish, sideways), considering the market status. Determine sentiment.
-3.  **Volatility**: Analyze relevant indicators (e.g., price range from quote, or relationship between short/long term MAs if applicable) to comment on current volatility. Determine sentiment.
-4.  **Momentum**: Analyze relevant Technical Analysis Indicators (RSI, MACD histogram) from the 'technicalAnalysis' section to assess momentum. Determine sentiment.
+1.  **Stock Price Action**: Analyze the 'tickerSnapshot.day' section (o, h, l, c, v, vw) for current price action, and 'tickerSnapshot.todaysChange' and 'tickerSnapshot.todaysChangePerc' for daily change. Also consider 'stockQuote' for previous close context. Frame this within 'marketStatus'. Determine sentiment.
+2.  **Trend**: Analyze relevant Technical Analysis Indicators (EMAs, SMAs, MACD) from the 'technicalAnalysis' section to determine the current trend (e.g., bullish, bearish, sideways), considering the market status. Consider if 'tickerSnapshot.day.vw' (VWAP) provides any confirmation for the trend. Determine sentiment.
+3.  **Volatility**: Analyze the price range from 'tickerSnapshot.day' (h - l) and potentially 'tickerSnapshot.min' data if details are available, or relationship between short/long term MAs to comment on current volatility. Determine sentiment.
+4.  **Momentum**: Analyze relevant Technical Analysis Indicators (RSI, MACD histogram) from the 'technicalAnalysis' section to assess momentum. Consider if 'tickerSnapshot.day.v' (volume) or 'tickerSnapshot.min.v' (if available) provides any confirmation for momentum alongside RSI/MACD. Determine sentiment.
 5.  **Patterns**: Briefly note if any obvious chart patterns are suggested by the MAs or price action (e.g., "MAs converging suggesting potential crossover" or "Price testing short-term MA"). If none are apparent, state "No clear patterns observed from provided data." Determine sentiment.
 
-Stock Data (JSON String with marketStatus, stockQuote and technicalAnalysis sections):
+StockData (JSON String with marketStatus, stockQuote, technicalAnalysis, and tickerSnapshot sections):
 \`\`\`json
 {{{stockData}}}
 \`\`\`
@@ -60,10 +60,10 @@ Focus on actionable or insightful points. Ensure your analysis reflects the prov
 
 Example Output Structure (Ensure your output matches this structure exactly):
 {
-  "stockPriceAction": { "text": "- As of [marketStatus.serverTime] (market [marketStatus.market]), price shows [movement] with [details from quote].", "sentiment": "[bullish/bearish/neutral]" },
-  "trend": { "text": "- Trend appears [bullish/bearish/sideways] based on [MA/MACD observations, noting if any were '${DISABLED_BY_CONFIG_TEXT}' or if data is limited by market status].", "sentiment": "[bullish/bearish/neutral]" },
-  "volatility": { "text": "- Volatility appears [high/moderate/low] based on [price range/MA spread, noting if MAs were '${DISABLED_BY_CONFIG_TEXT}'].", "sentiment": "[bullish/bearish/neutral]" },
-  "momentum": { "text": "- Momentum is [strong/waning/neutral] as indicated by RSI [RSI value] and MACD [MACD details, noting if '${DISABLED_BY_CONFIG_TEXT}'].", "sentiment": "[bullish/bearish/neutral]" },
+  "stockPriceAction": { "text": "- As of [marketStatus.serverTime] (market [marketStatus.market]), current day's price shows [movement from tickerSnapshot.day.o, tickerSnapshot.day.c] with VWAP at [tickerSnapshot.day.vw]. Today's change is [tickerSnapshot.todaysChange]. Previous close was [stockQuote.price].", "sentiment": "[bullish/bearish/neutral]" },
+  "trend": { "text": "- Trend appears [bullish/bearish/sideways] based on [MA/MACD observations, noting if any were '${DISABLED_BY_CONFIG_TEXT}' or if data is limited by market status]. VWAP [tickerSnapshot.day.vw] may offer confirmation.", "sentiment": "[bullish/bearish/neutral]" },
+  "volatility": { "text": "- Volatility appears [high/moderate/low] based on day range [tickerSnapshot.day.h - tickerSnapshot.day.l] or [MA spread, noting if MAs were '${DISABLED_BY_CONFIG_TEXT}'].", "sentiment": "[bullish/bearish/neutral]" },
+  "momentum": { "text": "- Momentum is [strong/waning/neutral] as indicated by RSI [RSI value] and MACD [MACD details, noting if '${DISABLED_BY_CONFIG_TEXT}']. Daily volume [tickerSnapshot.day.v] can be a confirming factor.", "sentiment": "[bullish/bearish/neutral]" },
   "patterns": { "text": "- [Observation on MAs, price action, or 'No clear patterns observed', noting if MAs were '${DISABLED_BY_CONFIG_TEXT}'].", "sentiment": "[bullish/bearish/neutral]" }
 }
 `,

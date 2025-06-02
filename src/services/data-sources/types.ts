@@ -36,6 +36,7 @@ export const EMPTY_STOCK_DATA_JSON: StockDataJson = {
   },
   stockQuote: undefined,
   technicalAnalysis: undefined,
+  tickerSnapshot: undefined,
 };
 
 

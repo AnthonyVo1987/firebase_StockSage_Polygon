@@ -19,9 +19,10 @@ import {
   type IMACDIndicatorResults,
   type IIndicatorValue,
   type IMACDValue,
+  type ISnapshot,
 } from '@polygon.io/client-js';
 import type { IDataSourceAdapter, AdapterOutput, StockDataJson } from '../types';
-import type { MarketStatusData, StockQuoteData, TechnicalAnalysisData, IndicatorValue as MappedIndicatorValue } from '../types'; // Use re-exported types
+import type { MarketStatusData, StockQuoteData, TechnicalAnalysisData, IndicatorValue as MappedIndicatorValue, TickerSnapshotData, TickerSnapshotDayData, TickerSnapshotMinData, TickerSnapshotPrevDayData } from '../types'; // Use re-exported types
 import { DISABLED_BY_CONFIG_TEXT } from '@/ai/schemas/stock-fetch-schemas';
 import { EMPTY_STOCK_DATA_JSON } from '../types';
 
@@ -219,6 +220,7 @@ export class PolygonAdapter implements IDataSourceAdapter {
       marketStatus: undefined,
       stockQuote: undefined,
       technicalAnalysis: JSON.parse(JSON.stringify(DEFAULT_TA_NULL_VALUES_ADAPTER)) as TechnicalAnalysisData,
+      tickerSnapshot: undefined,
     };
 
     if (currentFetchConfig.marketStatus.active) {
@@ -230,6 +232,60 @@ export class PolygonAdapter implements IDataSourceAdapter {
         return { stockDataJson: { ...finalOutputData, marketStatus: undefined }, error: `Failed to fetch critical market status for ${upperTicker}: ${error.message}` };
       }
     }
+
+    // Fetch Ticker Snapshot Data
+    console.log(`[ADAPTER:Polygon:Snapshot:Attempt] Fetching snapshot for ${upperTicker}.`);
+    try {
+      const snapshotResponse = await this.rest.stocks.snapshotTicker(upperTicker);
+      if (snapshotResponse && snapshotResponse.ticker) {
+        const tickerData = snapshotResponse.ticker;
+        const dayData = tickerData.day;
+        const minData = tickerData.min;
+        const prevDayData = tickerData.prevDay;
+
+        finalOutputData.tickerSnapshot = {
+          ticker: tickerData.ticker,
+          todaysChangePerc: formatNumber(tickerData.todaysChangePerc),
+          todaysChange: formatNumber(tickerData.todaysChange),
+          updated: tickerData.updated, // Assuming this is already a number or string
+          day: dayData ? {
+            o: formatNumber(dayData.o),
+            h: formatNumber(dayData.h),
+            l: formatNumber(dayData.l),
+            c: formatNumber(dayData.c),
+            v: formatNumber(dayData.v),
+            vw: formatNumber(dayData.vw),
+          } : null,
+          min: minData ? {
+            av: formatNumber(minData.av),
+            t: minData.t, // Assuming timestamp, keep as is
+            n: minData.n, // Assuming count, keep as is
+            o: formatNumber(minData.o),
+            h: formatNumber(minData.h),
+            l: formatNumber(minData.l),
+            c: formatNumber(minData.c),
+            v: formatNumber(minData.v),
+            vw: formatNumber(minData.vw),
+          } : null,
+          prevDay: prevDayData ? {
+            o: formatNumber(prevDayData.o),
+            h: formatNumber(prevDayData.h),
+            l: formatNumber(prevDayData.l),
+            c: formatNumber(prevDayData.c),
+            v: formatNumber(prevDayData.v),
+            vw: formatNumber(prevDayData.vw),
+          } : null,
+        };
+        console.log(`[ADAPTER:Polygon:Snapshot:Success] Successfully fetched snapshot for ${upperTicker}.`);
+      } else {
+        console.log(`[ADAPTER:Polygon:Snapshot:Info] No snapshot data returned for ${upperTicker}.`);
+        finalOutputData.tickerSnapshot = undefined;
+      }
+    } catch (error: any) {
+      console.error(`[ADAPTER:Polygon:Snapshot:Error] Error fetching snapshot for ${upperTicker}:`, error.message);
+      finalOutputData.tickerSnapshot = undefined;
+    }
+    await delay(API_CALL_DELAY_MS);
 
     if (currentFetchConfig.previousClose.active) {
       try {
