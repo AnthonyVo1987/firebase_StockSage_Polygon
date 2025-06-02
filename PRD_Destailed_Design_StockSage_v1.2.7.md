@@ -3,7 +3,7 @@
 
 *   **Document Version:** 1.2.7
 *   **Based on Commit:** #602e09a8
-*   **Date:** 2024-07-31 <!-- Assuming current date; AI to use actual date -->
+*   **Date:** 2025-06-01 <!-- Assuming current date; AI to use actual date -->
 *   **Author:** Firebase Studio (AI)
 *   **Status:** Baseline for understanding StockSage v1.2.7
 
