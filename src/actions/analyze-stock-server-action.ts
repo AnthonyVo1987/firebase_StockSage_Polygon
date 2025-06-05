@@ -2,13 +2,10 @@
 'use server';
 
 import { fetchStockDataFromSource } from '@/services/data-sources';
-import type { DataSourceId, AnalysisMode } from '@/services/data-sources/types';
-import { ALLOWED_DATA_SOURCE_IDS } from '@/services/data-sources/types';
+import type { DataSourceId } from '@/services/data-sources/types';
+import { ALLOWED_DATA_SOURCE_IDS } from '@/services/data-sources/types'; // Removed DEFAULT_GRANULAR_TA_CONFIG
 import type { AdapterOutput } from '@/services/data-sources/types';
-// AnalyzeStockDataOutput and UsageReport are not directly used in this action's return type anymore.
-// import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas';
-// import type { UsageReport } from '@/ai/schemas/common-schemas';
-import type { UsageReport } from '@/ai/schemas/common-schemas'; // Still needed for fetchUsageReport
+import type { UsageReport } from '@/ai/schemas/common-schemas';
 import { z } from 'zod';
 
 const ActionInputSchema = z.object({
@@ -17,99 +14,95 @@ const ActionInputSchema = z.object({
     .max(10, { message: "Ticker symbol is too long (max 10 chars)." })
     .regex(/^[a-zA-Z0-9.-]+$/, { message: "Ticker can only contain letters, numbers, dots, and hyphens."}),
   dataSource: z.enum(ALLOWED_DATA_SOURCE_IDS, {
-    errorMap: () => ({ message: "Invalid data source selected." })
+    errorMap: () => ({ message: "Invalid API data source selected." })
   }),
-  analysisMode: z.enum(['live', 'mock'], {
-    errorMap: () => ({ message: "Invalid analysis mode specified."})
-  }),
+  // selectedIndicatorsConfig and apiCallDelay removed for v1.2.9
 });
 
-// This status is now more granular to reflect the two-stage process.
-// 'data_fetching' and 'analyzing_data' are transient states set by the client before calling actions.
 export type AnalysisStatus = 'idle' | 'data_fetching' | 'data_fetched_analysis_pending' | 'analyzing_data' | 'analysis_complete' | 'error_fetching_data' | 'error_analyzing_data';
 
-// Type definition for the state THIS action (fetchStockDataAction) returns.
-// It no longer includes 'analysis' or 'analysisUsageReport'.
 export interface StockDataFetchState {
   stockJson?: string;
   error?: string;
   fieldErrors?: {
     ticker?: string[] | undefined;
     dataSource?: string[] | undefined;
-    analysisMode?: string[] | undefined;
+    // selectedIndicatorsConfig and apiCallDelay field errors removed
   };
-  timestamp?: number; // Timestamp of this data fetch result
+  timestamp?: number;
   fetchUsageReport?: UsageReport;
-  analysisStatus: AnalysisStatus; // Critical: 'data_fetched_analysis_pending' or 'error_fetching_data' or 'data_fetching'
+  analysisStatus: AnalysisStatus;
   tickerUsed?: string;
   dataSourceUsed?: DataSourceId;
-  analysisModeUsed?: AnalysisMode;
+  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
 }
 
 
 export async function fetchStockDataAction(
-  // prevState is the state from the *previous* execution of THIS action.
   prevState: StockDataFetchState,
   formData: FormData
 ): Promise<StockDataFetchState> {
   const rawTicker = formData.get('ticker') as string | null;
-  const tickerToUse = rawTicker?.trim().toUpperCase() || "NVDA"; // Ensure uppercase for consistency
+  const tickerToUse = rawTicker?.trim().toUpperCase() || "NVDA";
   const dataSourceFromForm = formData.get('dataSource') as string | null;
-  const analysisModeFromForm = formData.get('analysisMode') as 'live' | 'mock' | null;
+  // selectedIndicatorsConfigString and apiCallDelayString removed
 
-  console.log(`[ACTION:FetchStockDataAction] Processing for ticker: "${tickerToUse}", DataSource: ${dataSourceFromForm}, Mode: ${analysisModeFromForm}. Prev action timestamp: ${prevState?.timestamp}`);
+  console.log(`[ACTION:FetchStockDataAction] Processing for ticker: "${tickerToUse}", DataSource: ${dataSourceFromForm}`);
 
-  // This state is specific to the current invocation of fetchStockDataAction
+  // parsedTaConfig removed
+
   const currentActionRunState: StockDataFetchState = {
     stockJson: undefined,
     error: undefined,
     fieldErrors: undefined,
     timestamp: Date.now(),
     fetchUsageReport: undefined,
-    analysisStatus: 'data_fetching', // Initial status for this run
+    analysisStatus: 'data_fetching',
     tickerUsed: tickerToUse,
     dataSourceUsed: dataSourceFromForm as DataSourceId,
-    analysisModeUsed: analysisModeFromForm as AnalysisMode,
+    // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
   };
 
   const validatedFields = ActionInputSchema.safeParse({
     ticker: tickerToUse,
     dataSource: dataSourceFromForm,
-    analysisMode: analysisModeFromForm,
+    // selectedIndicatorsConfig and apiCallDelay removed from validation
   });
 
   if (!validatedFields.success) {
     console.warn(`[ACTION:FetchStockDataAction] Input validation failed for "${tickerToUse}":`, validatedFields.error.flatten().fieldErrors);
     return {
       ...currentActionRunState,
-      error: `Invalid input for ${tickerToUse}. Please check ticker, data source, and analysis mode.`,
+      error: `Invalid input for ${tickerToUse}. Please check inputs.`,
       fieldErrors: validatedFields.error.flatten().fieldErrors,
       analysisStatus: 'error_fetching_data',
     };
   }
   console.log(`[ACTION:FetchStockDataAction] Input validation successful for "${tickerToUse}":`, validatedFields.data);
 
-  const { ticker, dataSource, analysisMode } = validatedFields.data; // 'ticker' here is validated 'tickerToUse'
+  const { ticker, dataSource } = validatedFields.data;
+  // validatedApiCallDelay removed
+  // finalSelectedTaConfig removed
+  
   let fetchUsageReport: UsageReport | undefined;
 
   try {
-    console.log(`[ACTION:FetchStockDataAction] Calling fetchStockDataFromSource service for "${ticker}", Source: ${dataSource}, Mode: ${analysisMode}`);
+    console.log(`[ACTION:FetchStockDataAction] Calling fetchStockDataFromSource service for "${ticker}", Source: ${dataSource}`);
     const adapterOutput: AdapterOutput = await fetchStockDataFromSource(
       ticker,
-      dataSource as DataSourceId,
-      analysisMode as AnalysisMode
+      dataSource as DataSourceId
+      // No TA config or API delay passed for v1.2.9
     );
 
     fetchUsageReport = adapterOutput.usageReport;
 
     if (adapterOutput.error || !adapterOutput.stockDataJson) {
-      const errorMsg = adapterOutput.error || `Failed to retrieve/generate stock data for "${ticker}" (Source: ${dataSource}, Mode: ${analysisMode}).`;
+      const errorMsg = adapterOutput.error || `Failed to retrieve/generate stock data for "${ticker}" (Source: ${dataSource}).`;
       console.error(`[ACTION:FetchStockDataAction] Error from fetchStockDataFromSource for "${ticker}": ${errorMsg}`);
       return {
         ...currentActionRunState,
-        tickerUsed: ticker, // ensure tickerUsed is from validated data
+        tickerUsed: ticker,
         dataSourceUsed: dataSource,
-        analysisModeUsed: analysisMode,
         error: errorMsg,
         fetchUsageReport,
         analysisStatus: 'error_fetching_data',
@@ -123,7 +116,6 @@ export async function fetchStockDataAction(
             ...currentActionRunState,
             tickerUsed: ticker,
             dataSourceUsed: dataSource,
-            analysisModeUsed: analysisMode,
             error: errorMsg,
             fetchUsageReport,
             analysisStatus: 'error_fetching_data',
@@ -141,7 +133,6 @@ export async function fetchStockDataAction(
             ...currentActionRunState,
             tickerUsed: ticker,
             dataSourceUsed: dataSource,
-            analysisModeUsed: analysisMode,
             error: errorMsg,
             fetchUsageReport,
             analysisStatus: 'error_fetching_data',
@@ -149,12 +140,10 @@ export async function fetchStockDataAction(
     }
     console.log(`[ACTION:FetchStockDataAction] For "${ticker}", received stockDataJson (first 200 chars): ${stockJsonStringForDisplay.substring(0,200)}...`);
 
-    // Successful data fetch, AI analysis is now pending
     const successState: StockDataFetchState = {
       ...currentActionRunState,
-      tickerUsed: ticker, // Ensure tickerUsed reflects the successfully fetched ticker
+      tickerUsed: ticker,
       dataSourceUsed: dataSource,
-      analysisModeUsed: analysisMode,
       stockJson: stockJsonStringForDisplay,
       fetchUsageReport,
       analysisStatus: 'data_fetched_analysis_pending',
@@ -172,11 +161,10 @@ export async function fetchStockDataAction(
     }
     return {
         ...currentActionRunState,
-        tickerUsed: ticker, // Ensure tickerUsed is set even on unexpected error
-        dataSourceUsed: dataSourceFromForm as DataSourceId, // Use initially parsed if validated data not available
-        analysisModeUsed: analysisModeFromForm as AnalysisMode,
+        tickerUsed: ticker,
+        dataSourceUsed: dataSourceFromForm as DataSourceId,
         error: displayError,
-        fetchUsageReport, // May or may not exist
+        fetchUsageReport,
         analysisStatus: 'error_fetching_data',
     };
   }

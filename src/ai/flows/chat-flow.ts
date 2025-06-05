@@ -3,10 +3,11 @@
 /**
  * @fileOverview An AI chatbot flow for financial discussions.
  * - chatWithBot - Handles user interaction with the financial chatbot.
+ * Web search tools have been removed. Chatbot relies on provided context and general knowledge.
  */
 
 import { ai } from '@/ai/genkit';
-import { webSearchTool } from '@/ai/tools/web-search-tool';
+// webSearchTool import removed
 import {
   ChatInputSchema,
   type ChatInput,
@@ -32,7 +33,7 @@ const systemInstruction = `You are StockSage Assistant, an expert AI specializin
 
 **Behavior Guidelines:**
 1.  **Scope Adherence**:
-    *   ONLY answer questions related to: stocks, options, ETFs, market sentiment, specific company financial data/news (if available or searchable), investing strategies, trading concepts, general financial advice (with disclaimers), and economic trends.
+    *   ONLY answer questions related to: stocks, options, ETFs, market sentiment, specific company financial data/news (if available in provided context), investing strategies, trading concepts, general financial advice (with disclaimers), and economic trends.
     *   If the user asks a question outside these topics, you MUST politely decline. State: "I can only assist with questions related to stocks, options, investing, and other financial topics. How can I help you with those areas? 🤔"
 2.  **Context Utilization**:
     *   If 'Current Stock Data (JSON)' (which includes 'marketStatus', 'stockSnapshot' (containing 'day', 'min', 'prevDay' objects with timestamps in PT format), and 'technicalAnalysis' including 'vwap') or 'Current AI Analysis Summary' are provided below, use them as the primary source.
@@ -41,16 +42,13 @@ const systemInstruction = `You are StockSage Assistant, an expert AI specializin
     *   'technicalAnalysis.vwap' contains VWAP data derived from the snapshot ('day' and 'minute').
     *   Always acknowledge if you are using provided context. For example, "Based on the provided data for [TICKER] (snapshot updated at [stockSnapshot.updated PT], previous close was [stockSnapshot.prevDay.c])..."
     *   **When your response is based on the 'Current Stock Data (JSON)' or 'Current AI Analysis Summary' provided in the context, your analysis MUST be strictly limited to the information present in that data. Do NOT speculate on or introduce external factors, news, or catalysts not explicitly mentioned in the provided context.**
-3.  **Tool Usage (Web Search & Google Search Grounding)**:
-    *   Prefer 'GoogleSearchRetrieval' for current, factual information not in provided context.
-    *   When using a tool, state you are searching. E.g., "Let me search for that... 🔍"
-    *   Synthesize tool results concisely.
-4.  **Clarity, Conciseness, and Formatting**:
+    *   **Do NOT use web search tools to find information. Rely on your general knowledge or the provided context only.**
+3.  **Clarity, Conciseness, and Formatting**:
     *   Provide clear, direct, and easy-to-understand answers.
     *   **Format responses using Markdown.** Use headings, **bold**, *italics*, _underline_, and bullet points.
-    *   Incorporate relevant emojis (📈, 📉, 💡, 💰, ⚠️, ✅, ❌, 🤔, 🔍).
+    *   Incorporate relevant emojis (📈, 📉, 💡, 💰, ⚠️, ✅, ❌, 🤔).
     *   Ensure JSON data in responses is in a well-formatted JSON string block.
-5.  **Disclaimer for Advice**: If providing information that could be financial advice, include: "⚠️ Please remember, I am an AI assistant and this is not financial advice. Always consult with a qualified financial advisor."
+4.  **Disclaimer for Advice**: If providing information that could be financial advice, include: "⚠️ Please remember, I am an AI assistant and this is not financial advice. Always consult with a qualified financial advisor."
 
 **Provided Context (if any):**
 {{#if stockJson}}
@@ -90,11 +88,8 @@ const chatPrompt = ai.definePrompt({
   name: 'financialChatPrompt',
   input: { schema: ChatInputSchema },
   output: { schema: ChatOutputSchema },
-  tools: [webSearchTool],
+  // tools and toolConfig removed
   model: DEFAULT_CHAT_MODEL_ID,
-  toolConfig: {
-    googleSearchRetrieval: {}
-  },
   prompt: systemInstruction,
   config: {
     temperature: 0.5,
@@ -116,13 +111,9 @@ const chatFlow = ai.defineFlow(
   },
   async (input: ChatInput): Promise<ChatFlowOutput> => {
     console.log('[FLOW:Chat:Internal] Entered chatFlow (Genkit flow). Input keys:', Object.keys(input));
+    console.log('[FLOW:Chat:Internal] Calling chatPrompt with the full input object. No tools configured.');
 
-    // The 'input' object (ChatInput) contains userPrompt, stockJson, analysisSummary, and chatHistory.
-    // The handlebars template in systemInstruction directly accesses these from the 'input'.
-    // Thus, we pass the entire 'input' object to the prompt.
-    console.log('[FLOW:Chat:Internal] Calling chatPrompt with the full input object.');
-
-    const response = await chatPrompt(input); // Pass the whole input object
+    const response = await chatPrompt(input);
     console.log('[FLOW:Chat:Internal:AIResponse] AI (prompt) response received. Output text sample:', response.output?.response.substring(0,100) + "...", 'Usage:', response.usage);
 
     if (!response.output?.response) {

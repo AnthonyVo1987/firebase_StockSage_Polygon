@@ -2,8 +2,9 @@
 /**
  * @fileOverview Utility functions for data exporting (JSON, Text, CSV), downloading, and copying to clipboard.
  */
-import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas'; // Ensure this type is available
-import type { ToastProps } from '@/components/ui/toast'; // For toast function signature
+import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas'; 
+import type { StockDataJson } from '@/services/data-sources/types'; // Use our internal StockDataJson type
+import type { ToastProps } from '@/components/ui/toast'; 
 
 type ToastFunction = (props: Omit<ToastProps, "id">) => void;
 
@@ -40,7 +41,7 @@ export function formatJsonForExport(data: any): string {
     try {
       dataString = JSON.stringify(JSON.parse(data), null, 2);
     } catch (e) {
-      dataString = data; // Assume it's already formatted or non-JSON string
+      dataString = data; 
     }
   } else {
     dataString = JSON.stringify(data, null, 2);
@@ -50,45 +51,62 @@ export function formatJsonForExport(data: any): string {
 }
 
 /**
- * Converts stock JSON string to CSV format.
+ * Converts stock JSON string (now based on StockDataJson) to CSV format.
  * @param jsonString - The stock data as a JSON string.
  * @returns A string in CSV format.
  */
 function stockJsonToCsv(jsonString: string): string {
   try {
-    const data = JSON.parse(jsonString);
-    let csvRows = ["Category,Property,Value,Period,Signal,Histogram"];
+    const data = JSON.parse(jsonString) as StockDataJson;
+    let csvRows = ["Category,SubCategory,Property,Value,Period,Signal,Histogram"]; // Added SubCategory
 
+    // Market Status
     if (data.marketStatus) {
       for (const [key, value] of Object.entries(data.marketStatus)) {
         if (typeof value === 'object' && value !== null) {
           for (const [subKey, subValue] of Object.entries(value)) {
-            csvRows.push(`MarketStatus,${escapeCsvField(key + '.' + subKey)},${escapeCsvField(subValue)},,,,`);
+            csvRows.push(`MarketStatus,${escapeCsvField(key)},${escapeCsvField(subKey)},${escapeCsvField(subValue)},,,,`);
           }
         } else {
-          csvRows.push(`MarketStatus,${escapeCsvField(key)},${escapeCsvField(value)},,,,`);
+          csvRows.push(`MarketStatus,,${escapeCsvField(key)},${escapeCsvField(value)},,,,`);
         }
       }
     }
 
-    if (data.stockQuote) {
-      for (const [key, value] of Object.entries(data.stockQuote)) {
-        csvRows.push(`StockQuote,${escapeCsvField(key)},${escapeCsvField(value)},,,,`);
-      }
-    }
+    // Stock Snapshot (day, min, prevDay)
+    if (data.stockSnapshot) {
+        const { ticker, todaysChangePerc, todaysChange, updated, day, min, prevDay } = data.stockSnapshot;
+        csvRows.push(`StockSnapshot,Details,ticker,${escapeCsvField(ticker)},,,,`);
+        csvRows.push(`StockSnapshot,Details,todaysChangePerc,${escapeCsvField(todaysChangePerc)},,,,`);
+        csvRows.push(`StockSnapshot,Details,todaysChange,${escapeCsvField(todaysChange)},,,,`);
+        csvRows.push(`StockSnapshot,Details,updated,${escapeCsvField(updated)},,,,`);
 
+        const processSnapshotAgg = (aggName: string, aggData: typeof day | typeof min | typeof prevDay) => {
+            if (aggData) {
+                for (const [key, value] of Object.entries(aggData)) {
+                    csvRows.push(`StockSnapshot,${escapeCsvField(aggName)},${escapeCsvField(key)},${escapeCsvField(value)},,,,`);
+                }
+            }
+        };
+        processSnapshotAgg("day", day);
+        processSnapshotAgg("min", min);
+        processSnapshotAgg("prevDay", prevDay);
+    }
+    
+    // Technical Analysis
     if (data.technicalAnalysis) {
       for (const [taKey, taValueObj] of Object.entries(data.technicalAnalysis as Record<string, any>)) {
         if (taValueObj && typeof taValueObj === 'object') {
           if (taKey === 'macd') {
-            csvRows.push(`TechnicalAnalysis,${escapeCsvField(taKey)},${escapeCsvField((taValueObj as any).value)},,${escapeCsvField((taValueObj as any).signal)},${escapeCsvField((taValueObj as any).histogram)}`);
-          } else {
+            csvRows.push(`TechnicalAnalysis,MACD,value,${escapeCsvField((taValueObj as any).value)},,${escapeCsvField((taValueObj as any).signal)},${escapeCsvField((taValueObj as any).histogram)}`);
+          } else if (taKey === 'vwap') {
+             csvRows.push(`TechnicalAnalysis,VWAP,day,${escapeCsvField((taValueObj as any).day)},Day,,,`);
+             csvRows.push(`TechnicalAnalysis,VWAP,minute,${escapeCsvField((taValueObj as any).minute)},Minute,,,`);
+          } else { // RSI, EMA, SMA
             for (const [period, value] of Object.entries(taValueObj)) {
-              csvRows.push(`TechnicalAnalysis,${escapeCsvField(taKey)},${escapeCsvField(value)},${escapeCsvField(period)},,`);
+              csvRows.push(`TechnicalAnalysis,${escapeCsvField(taKey.toUpperCase())},value,${escapeCsvField(value)},${escapeCsvField(period)},,`);
             }
           }
-        } else {
-          csvRows.push(`TechnicalAnalysis,${escapeCsvField(taKey)},N/A,,,,`);
         }
       }
     }
@@ -98,6 +116,7 @@ function stockJsonToCsv(jsonString: string): string {
     return "Error: Could not parse stock JSON for CSV.";
   }
 }
+
 
 /**
  * Converts AI analysis output to CSV format.
@@ -129,6 +148,8 @@ function allPageDataToCsv(data: Record<string, any>): string {
           acc[`${newKey}.${takeawayKey}.text`] = takeawayValue.text;
           acc[`${newKey}.${takeawayKey}.sentiment`] = takeawayValue.sentiment;
         });
+      } else if (k === 'stockAndTAData' && obj[k] && typeof obj[k] === 'object') { // Special handling for stockAndTAData
+        Object.assign(acc, flattenObject(obj[k], newKey)); // Flatten it further
       } else if (obj[k] && typeof obj[k] === 'object' && !Array.isArray(obj[k]) && Object.keys(obj[k]).length > 0) {
         Object.assign(acc, flattenObject(obj[k], newKey));
       } else if (obj[k] !== undefined) {
@@ -145,16 +166,10 @@ function allPageDataToCsv(data: Record<string, any>): string {
   return csvRows.join("\n");
 }
 
-/**
- * Converts data to CSV format based on a dataTypeHint.
- * @param data - The data to convert.
- * @param titleForCsv - The title (unused in current CSV logic, but kept for signature consistency).
- * @param dataTypeHint - Hints at the type of data for specific CSV conversion.
- * @returns A string in CSV format.
- */
+
 export function convertToCsvForExport(
   data: any,
-  titleForCsv: string, // Kept for consistent signature, though might not be used by all specific converters
+  titleForCsv: string, 
   dataTypeHint?: 'stockJson' | 'analysis' | 'allPageData'
 ): string {
   let result: string;
@@ -165,7 +180,6 @@ export function convertToCsvForExport(
   } else if (dataTypeHint === 'allPageData' && typeof data === 'object' && data !== null) {
     result = allPageDataToCsv(data);
   } else {
-    // Fallback for generic data or if hint is not provided/matched
     if (typeof data === 'object' && data !== null) result = JSON.stringify(data);
     else result = String(data);
   }
@@ -189,6 +203,7 @@ export function convertToTextForExport(data: any, title: string): string {
     });
   } else if (typeof data === 'string') {
     try {
+      // Attempt to parse and re-stringify for pretty print if it's JSON
       textContent += JSON.stringify(JSON.parse(data), null, 2);
     } catch (e) {
       textContent += data; // If it's not JSON, just append the string
@@ -243,3 +258,4 @@ export async function copyToClipboardUtil(
   }
 }
 
+    

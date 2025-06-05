@@ -9,14 +9,18 @@ export const ChatInputSchema = z.object({
   userPrompt: z.string().min(1, "Prompt cannot be empty.").describe('The user\'s message or question to the chatbot.'),
   stockJson: z.string().optional().describe('Current stock and technical analysis data in JSON format (if available).'),
   analysisSummary: z.string().optional().describe('A summary of the current AI stock analysis (price action, trend, volatility, momentum, patterns).'),
-  chatHistory: z.array(z.object({
-    role: z.enum(['user', 'model']),
-    parts: z.array(z.object({
-        text: z.string().optional(),
-        toolCall: z.any().optional(), // Simplified for history
-        toolResponse: z.any().optional(), // Simplified for history
-    }))
-  })).optional().describe('The history of the conversation so far.'),
+  chatHistory: z.array(
+    z.object({
+      role: z.enum(['user', 'model']),
+      parts: z.array(
+        z.object({
+          text: z.string().optional(),
+          toolCall: z.any().optional(), 
+          toolResponse: z.any().optional(), 
+        })
+      ).min(1)
+    })
+  ).optional().describe('The history of the conversation so far. Client should only send text parts.'),
 });
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
@@ -29,7 +33,7 @@ export type ChatOutput = z.infer<typeof ChatOutputSchema>;
 // Flow's output including usage and the AI's response
 export const ChatFlowOutputSchema = z.object({
   aiResponse: ChatOutputSchema,
-  usage: z.object({ // This matches the structure Genkit provides
+  usage: z.object({ 
     inputTokens: z.number().optional(),
     outputTokens: z.number().optional(),
     totalTokens: z.number().optional(),

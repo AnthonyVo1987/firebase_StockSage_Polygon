@@ -30,8 +30,8 @@ function SubmitChatButtonInternal() {
 
 export default function Chatbot() {
   const {
-    combinedServerState, // Use combinedServerState directly
-    aiAnalysisResultState, // Use aiAnalysisResultState for tickerAnalyzed
+    combinedServerState, 
+    aiAnalysisResultState, 
     chatServerState,
     submitChatForm,
     chatFormPending,
@@ -324,6 +324,3 @@ export default function Chatbot() {
     </Card>
   );
 }
-
-
-    

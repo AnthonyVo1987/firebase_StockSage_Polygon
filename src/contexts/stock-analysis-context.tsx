@@ -13,7 +13,8 @@ import {
 import type { ChatState as ServerChatState, ChatMessage as ServerChatMessage } from '@/ai/schemas/chat-schemas';
 import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas';
 import type { UsageReport } from '@/ai/schemas/common-schemas';
-import type { DataSourceId, AnalysisMode } from '@/services/data-sources/types';
+import type { DataSourceId } from '@/services/data-sources/types'; // GranularTaConfigType removed
+// DEFAULT_GRANULAR_TA_CONFIG removed
 
 export type AnalysisStatus = StockDataFetchState['analysisStatus'];
 
@@ -26,7 +27,7 @@ export const initialStockDataFetchState: StockDataFetchState = {
   analysisStatus: 'idle',
   tickerUsed: undefined,
   dataSourceUsed: undefined,
-  analysisModeUsed: undefined,
+  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
 };
 
 export const initialAiAnalysisResultState: AiAnalysisResultState = {
@@ -48,7 +49,7 @@ export interface CombinedStockAnalysisState {
   analysisStatus: AnalysisStatus;
   tickerUsed?: string;
   dataSourceUsed?: DataSourceId;
-  analysisModeUsed?: AnalysisMode;
+  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
 }
 
 export const initialCombinedStockAnalysisState: CombinedStockAnalysisState = {
@@ -68,7 +69,7 @@ export const initialCombinedStockAnalysisState: CombinedStockAnalysisState = {
   analysisStatus: 'idle',
   tickerUsed: undefined,
   dataSourceUsed: undefined,
-  analysisModeUsed: undefined,
+  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
 };
 
 export interface CumulativeStats {
@@ -101,19 +102,19 @@ const initialChatState: ContextChatState = {
 
 interface StockAnalysisContextType {
   stockDataFetchState: StockDataFetchState;
-  aiAnalysisResultState: AiAnalysisResultState; // Ensure this is exposed
+  aiAnalysisResultState: AiAnalysisResultState;
 
   submitFetchStockDataForm: (formData: FormData) => void;
   fetchStockDataPending: boolean;
 
   submitPerformAiAnalysisForm: (formData: FormData) => void;
   performAiAnalysisPending: boolean;
-  
+
   combinedServerState: CombinedStockAnalysisState;
   cumulativeStats: CumulativeStats;
-  updateCumulativeStats: (report: UsageReport, flowType: 'fetch' | 'analysis' | 'chat') => void;
-  
-  chatServerState: ContextChatState; 
+  updateCumulativeStats: (report: UsageReport, flowType: 'analysis' | 'chat') => void;
+
+  chatServerState: ContextChatState;
   submitChatForm: (formData: FormData) => void;
   chatFormPending: boolean;
   clearChatHistoryContext: () => void;
@@ -133,7 +134,7 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     submitPerformAiAnalysisActionInternal,
     performAiAnalysisPending
   ] = useActionState(performAiAnalysisAction, initialAiAnalysisResultState);
-  
+
   const [combinedServerState, setCombinedServerState] = useState<CombinedStockAnalysisState>(initialCombinedStockAnalysisState);
   const [cumulativeStats, setCumulativeStats] = useState<CumulativeStats>(initialCumulativeStats);
 
@@ -142,7 +143,7 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
   const lastChatAiMessageIdProcessedForToast = useRef<string | undefined>();
 
 
-  const updateCumulativeStats = useCallback((report: UsageReport, flowType: 'fetch' | 'analysis' | 'chat') => {
+  const updateCumulativeStats = useCallback((report: UsageReport, flowType: 'analysis' | 'chat') => {
     console.log(`[CONTEXT] Updating cumulative stats with report from ${flowType} for ${report.flowName}:`, report);
     setCumulativeStats(prev => ({
       totalInputTokens: prev.totalInputTokens + (report.inputTokens || 0),
@@ -155,7 +156,7 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     console.log(`[CONTEXT:Effect:Fetch] stockDataFetchState changed. New timestamp: ${stockDataFetchState?.timestamp}, Last processed: ${lastProcessedFetchTimestamp.current}, Current context ticker: ${combinedServerState.tickerUsed}, FetchState ticker: ${stockDataFetchState?.tickerUsed}`);
-    
+
     if (!stockDataFetchState?.timestamp || stockDataFetchState.timestamp === lastProcessedFetchTimestamp.current) {
       if(stockDataFetchState?.timestamp && stockDataFetchState.timestamp === lastProcessedFetchTimestamp.current) {
         console.log(`[CONTEXT:Effect:Fetch] Skipping processing: Timestamp ${stockDataFetchState.timestamp} already processed.`);
@@ -169,10 +170,10 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
       console.warn(`[CONTEXT:Effect:Fetch] Stale stockDataFetchState for "${stockDataFetchState.tickerUsed}" ignored. Current operation is for "${combinedServerState.tickerUsed}". Fetch timestamp: ${stockDataFetchState.timestamp}`);
       return;
     }
-    
+
     console.log(`[CONTEXT:Effect:Fetch] Processing stockDataFetchState for ticker "${stockDataFetchState.tickerUsed}". Status: ${stockDataFetchState.analysisStatus}`);
     lastProcessedFetchTimestamp.current = stockDataFetchState.timestamp;
-    
+
     setCombinedServerState(prev => {
       if (stockDataFetchState.tickerUsed !== prev.tickerUsed) {
         console.warn(`[CONTEXT:Effect:Fetch:SetState] Stale stockDataFetchState for "${stockDataFetchState.tickerUsed}" IGNORED during setCombinedServerState. Prev ticker was "${prev.tickerUsed}". This shouldn't happen if outer checks are correct.`);
@@ -180,21 +181,20 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
       }
 
       return {
-        ...prev, // Keep existing combined state properties like tickerUsed
+        ...prev,
         stockJson: stockDataFetchState.stockJson,
-        analysis: stockDataFetchState.error || !stockDataFetchState.stockJson ? initialCombinedStockAnalysisState.analysis : prev.analysis, 
+        analysis: stockDataFetchState.error || !stockDataFetchState.stockJson ? initialCombinedStockAnalysisState.analysis : prev.analysis,
         error: stockDataFetchState.error,
         fieldErrors: stockDataFetchState.fieldErrors,
-        timestamp: stockDataFetchState.timestamp, 
+        timestamp: stockDataFetchState.timestamp,
         fetchUsageReport: stockDataFetchState.fetchUsageReport,
         analysisUsageReport: stockDataFetchState.error || !stockDataFetchState.stockJson ? undefined : prev.analysisUsageReport,
-        analysisStatus: stockDataFetchState.analysisStatus, 
+        analysisStatus: stockDataFetchState.analysisStatus,
+        dataSourceUsed: stockDataFetchState.dataSourceUsed,
+        // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
       };
     });
-    
-    if (stockDataFetchState.fetchUsageReport && stockDataFetchState.tickerUsed === combinedServerState.tickerUsed && !stockDataFetchState.error) {
-        updateCumulativeStats(stockDataFetchState.fetchUsageReport, 'fetch');
-    }
+
   }, [stockDataFetchState, combinedServerState.tickerUsed, updateCumulativeStats]);
 
 
@@ -209,10 +209,10 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
-    
+
     if (aiAnalysisResultState.tickerAnalyzed !== combinedServerState.tickerUsed) {
         console.warn(`[CONTEXT:Effect:Analysis] Stale AI analysis result for "${aiAnalysisResultState.tickerAnalyzed}" ignored. Current operation is for "${combinedServerState.tickerUsed}". Analysis timestamp: ${aiAnalysisResultState.timestamp}`);
-        return; 
+        return;
     }
     console.log(`[CONTEXT:Effect:Analysis] Processing aiAnalysisResultState for ticker "${aiAnalysisResultState.tickerAnalyzed}". Error: ${aiAnalysisResultState.error}`);
     lastProcessedAnalysisTimestamp.current = aiAnalysisResultState.timestamp;
@@ -228,7 +228,7 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
         analysisUsageReport: aiAnalysisResultState.analysisUsageReport,
         error: aiAnalysisResultState.error || (prev.analysisStatus === 'error_fetching_data' ? prev.error : undefined),
         analysisStatus: aiAnalysisResultState.error ? 'error_analyzing_data' : 'analysis_complete',
-        timestamp: aiAnalysisResultState.timestamp, 
+        timestamp: aiAnalysisResultState.timestamp,
       };
     });
 
@@ -236,35 +236,38 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
         updateCumulativeStats(aiAnalysisResultState.analysisUsageReport, 'analysis');
     }
   }, [aiAnalysisResultState, combinedServerState.tickerUsed, updateCumulativeStats]);
-  
+
 
   const submitFetchStockDataForm = useCallback((formData: FormData) => {
     const ticker = formData.get('ticker') as string | null;
     const dataSource = formData.get('dataSource') as string | null;
-    const analysisMode = formData.get('analysisMode') as 'live' | 'mock' | null;
     const processingTicker = ticker?.trim().toUpperCase() || "NVDA";
+    // selectedIndicatorsConfigString and apiCallDelayString removed
+
+    // parsedTaConfig removed
+    // parsedApiCallDelay removed
 
     console.log(
       `[CONTEXT_REQUEST] Action: fetchStockDataAction FOR TICKER: "${processingTicker}"`,
-      { dataSource, analysisMode }
+      { dataSource } // Only dataSource logged now
     );
-    
+
     setCombinedServerState({
-        ...initialCombinedStockAnalysisState, 
+        ...initialCombinedStockAnalysisState,
         tickerUsed: processingTicker,
         dataSourceUsed: dataSource as DataSourceId,
-        analysisModeUsed: analysisMode as AnalysisMode,
         analysisStatus: 'data_fetching',
-        timestamp: Date.now(), 
+        timestamp: Date.now(),
+        // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
     });
 
     lastProcessedFetchTimestamp.current = undefined;
     lastProcessedAnalysisTimestamp.current = undefined;
-        
+
     startTransition(() => {
       submitFetchStockDataActionInternal(formData);
     });
-  }, [submitFetchStockDataActionInternal]); 
+  }, [submitFetchStockDataActionInternal]);
 
 
   const submitPerformAiAnalysisForm = useCallback((formData: FormData) => {
@@ -279,20 +282,20 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
       setCombinedServerState(prev => ({
         ...prev,
         error: `Analysis for ${tickerToAnalyze} aborted as context changed to ${prev.tickerUsed}. Please re-analyze ${prev.tickerUsed}.`,
-        analysisStatus: 'error_analyzing_data', // Set appropriate error status
+        analysisStatus: 'error_analyzing_data',
       }));
       return;
     }
-    
-    setCombinedServerState(prev => ({ 
-      ...prev, 
+
+    setCombinedServerState(prev => ({
+      ...prev,
       analysisStatus: 'analyzing_data',
-      error: undefined, 
-      analysisUsageReport: undefined, 
-      analysis: initialCombinedStockAnalysisState.analysis, 
-      timestamp: Date.now(), 
+      error: undefined,
+      analysisUsageReport: undefined,
+      analysis: initialCombinedStockAnalysisState.analysis,
+      timestamp: Date.now(),
     }));
-    
+
     startTransition(() => {
       submitPerformAiAnalysisActionInternal(formData);
     });
@@ -354,14 +357,14 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
 
   const contextValue: StockAnalysisContextType = {
     stockDataFetchState,
-    aiAnalysisResultState, // Expose this state
+    aiAnalysisResultState,
     submitFetchStockDataForm,
     fetchStockDataPending,
     submitPerformAiAnalysisForm,
     performAiAnalysisPending,
     combinedServerState,
     cumulativeStats,
-    updateCumulativeStats, 
+    updateCumulativeStats,
     chatServerState,
     submitChatForm,
     chatFormPending,
@@ -388,6 +391,3 @@ declare module '@/ai/schemas/common-schemas' {
     timestampForCompare?: number;
   }
 }
-    
-
-    

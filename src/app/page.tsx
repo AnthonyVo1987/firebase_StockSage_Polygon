@@ -13,13 +13,14 @@ export default function Home() {
           </h1>
         </div>
         <p className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto">
-          Enter a stock ticker to view its (mock) data and get AI-powered insights. You can also chat with our AI assistant below for more detailed analysis or general financial queries.
+          Enter a stock ticker and select an API data source to view market data and AI-powered insights.
+          You can also chat with our AI assistant below for more detailed analysis or general financial queries.
         </p>
       </header>
       <StockAnalysisPage />
       <footer className="text-center py-8 mt-auto">
         <p className="text-sm text-muted-foreground">
-          StockSage &copy; {new Date().getFullYear()}. For demonstration purposes only. Stock data and search results are mocked.
+          StockSage &copy; {new Date().getFullYear()}. For demonstration purposes only.
           AI responses are for informational purposes and not financial advice.
         </p>
       </footer>

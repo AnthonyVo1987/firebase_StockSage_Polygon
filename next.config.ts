@@ -1,3 +1,4 @@
+
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
@@ -18,6 +19,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // No webpack function for async_hooks for v1.2.9
 };
 
 export default nextConfig;

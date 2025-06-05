@@ -1,29 +1,25 @@
+
 /**
  * @fileOverview Defines common interfaces and types for data source adapters.
  */
 
-import type { StockDataJson as SharedStockDataJson, MarketStatusData as SharedMarketStatusData, StockQuoteDataSchema as SharedStockQuoteData, TechnicalAnalysisDataSchema as SharedTechnicalAnalysisData, IndicatorValue as SharedIndicatorValue } from '@/ai/schemas/stock-fetch-schemas';
+import type { StockDataJson as SharedStockDataJson, MarketStatusData as SharedMarketStatusData, StockSnapshotDataSchema as SharedStockSnapshotData, TechnicalAnalysisDataSchema as SharedTechnicalAnalysisData, IndicatorValue as SharedIndicatorValue } from '@/ai/schemas/stock-fetch-schemas';
 import type { UsageReport } from '@/ai/schemas/common-schemas';
+import { DISABLED_BY_CONFIG_TEXT } from '@/ai/schemas/stock-fetch-schemas'; // Kept for consistency if some indicators truly become non-configurable at source
+import { formatTimestampToPacificTime } from '@/lib/date-utils';
 
-// Allowed data source identifiers, should match the values from the UI select component.
-export const ALLOWED_DATA_SOURCE_IDS = ["polygon-api", "ai-gemini-2.5-flash-preview-05-20"] as const;
+// Updated: Will only contain API-based sources. Initially just "polygon-api".
+export const ALLOWED_DATA_SOURCE_IDS = ["polygon-api"] as const;
 export type DataSourceId = typeof ALLOWED_DATA_SOURCE_IDS[number];
-export type AnalysisMode = 'live' | 'mock';
 
 
-// Re-exporting existing detailed types for clarity within this module if needed,
-// or they can be directly imported from @/ai/schemas/stock-fetch-schemas.
-export type { StockDataJson, MarketStatusData, SharedStockQuoteData as StockQuoteData, SharedTechnicalAnalysisData as TechnicalAnalysisData, SharedIndicatorValue as IndicatorValue };
+export type { StockDataJson, MarketStatusData, SharedStockSnapshotData as StockSnapshotData, SharedTechnicalAnalysisData as TechnicalAnalysisData, SharedIndicatorValue as IndicatorValue };
 
 
-/**
- * A default empty/error state for StockDataJson.
- * Ensures conformance with StockDataJsonSchema, especially the now-mandatory marketStatus.
- */
 export const EMPTY_STOCK_DATA_JSON: StockDataJson = {
-  marketStatus: { 
-    market: "unknown", // Default to unknown or closed
-    serverTime: new Date(0).toISOString(), // Epoch time as a placeholder for "unknown"
+  marketStatus: {
+    market: "unknown",
+    serverTime: formatTimestampToPacificTime(new Date(0).toISOString()),
     exchanges: {
         nyse: "unknown",
         nasdaq: "unknown",
@@ -34,32 +30,31 @@ export const EMPTY_STOCK_DATA_JSON: StockDataJson = {
         crypto: "unknown"
     }
   },
-  stockQuote: undefined,
-  technicalAnalysis: undefined,
+  stockSnapshot: undefined,
+  // For v1.2.9, TA indicators are fetched by default, so their values would be numbers or null, not DISABLED_BY_CONFIG_TEXT.
+  // However, keeping DISABLED_BY_CONFIG_TEXT if an indicator source might truly disable something.
+  // For Polygon adapter in v1.2.9, it will attempt to fetch all, resulting in number or null.
+  technicalAnalysis: {
+    rsi: { '7': null, '10': null, '14': null },
+    ema: { '5': null, '10': null, '20': null, '50': null, '200': null },
+    sma: { '5': null, '10': null, '20': null, '50': null, '200': null },
+    macd: { value: null, signal: null, histogram: null },
+    vwap: { day: null, minute: null }
+  },
 };
 
 
-/**
- * Represents the output from a data source adapter's getFullStockData method.
- */
 export interface AdapterOutput {
   stockDataJson: StockDataJson;
-  usageReport?: UsageReport; // Optional: only for AI-based adapters
+  usageReport?: UsageReport;
   error?: string;
 }
 
-/**
- * Interface for all data source adapters.
- * Each adapter is responsible for fetching the complete stock data
- * (market status, quote, and technical analysis) according to its specific source.
- */
+// GranularTaConfigType and DEFAULT_GRANULAR_TA_CONFIG removed for v1.2.9
+
 export interface IDataSourceAdapter {
-  /**
-   * Fetches comprehensive stock data including market status, quote, and technical analysis.
-   * @param ticker The stock ticker symbol.
-   * @returns A Promise resolving to an AdapterOutput object.
-   *          The stockDataJson should conform to the StockDataJson schema.
-   *          It MUST always include marketStatus.
-   */
-  getFullStockData(ticker: string): Promise<AdapterOutput>;
+  getFullStockData(
+    ticker: string
+    // selectedIndicatorsConfig and apiCallDelay removed for v1.2.9
+  ): Promise<AdapterOutput>;
 }

@@ -5,52 +5,38 @@
  */
 'use server';
 
-import type { AdapterOutput, DataSourceId, AnalysisMode } from './types'; // Updated import
+import type { AdapterOutput, DataSourceId } from './types'; // GranularTaConfigType removed
 import { PolygonAdapter } from './adapters/polygon-adapter';
-import { MockAdapter } from './adapters/mock-adapter';
-import { AISearchAdapter } from './adapters/ai-search-adapter';
 import { EMPTY_STOCK_DATA_JSON } from './types';
 
 
 // Store instances of adapters to reuse them
 const adapters = {
   polygon: new PolygonAdapter(),
-  mock: new MockAdapter(),
-  aiSearch: new AISearchAdapter(),
 };
 
 /**
- * Fetches stock data (market status, quote, TA) from the specified data source and mode.
+ * Fetches stock data (market status, quote, TA) from the specified data source.
+ * For v1.2.9, TA indicators and API delay are not configurable through this function.
  *
  * @param ticker The stock ticker symbol.
- * @param dataSourceId The identifier for the data source (e.g., "polygon-api", "ai-gemini...").
- * @param mode The analysis mode ("live" or "mock").
+ * @param dataSourceId The identifier for the data source (e.g., "polygon-api").
  * @returns A Promise resolving to an AdapterOutput object.
  */
 export async function fetchStockDataFromSource(
   ticker: string,
-  dataSourceId: DataSourceId,
-  mode: AnalysisMode
+  dataSourceId: DataSourceId
+  // selectedIndicatorsConfig and apiCallDelay removed for v1.2.9
 ): Promise<AdapterOutput> {
-  console.log(`[SERVICE:DataSourceRouter] Request received. Ticker: ${ticker}, SourceID: ${dataSourceId}, Mode: ${mode}`);
+  console.log(`[SERVICE:DataSourceRouter] Request received. Ticker: ${ticker}, SourceID: ${dataSourceId}`);
 
   try {
-    if (mode === 'mock') {
-      console.log(`[SERVICE:DataSourceRouter] Mode is 'mock'. Routing to MockAdapter.`);
-      return await adapters.mock.getFullStockData(ticker);
-    }
-
-    // Live mode routing
     switch (dataSourceId) {
       case 'polygon-api':
-        console.log(`[SERVICE:DataSourceRouter] Mode is 'live', SourceID is 'polygon-api'. Routing to PolygonAdapter.`);
-        return await adapters.polygon.getFullStockData(ticker);
-      case 'ai-gemini-2.5-flash-preview-05-20':
-        console.log(`[SERVICE:DataSourceRouter] Mode is 'live', SourceID is 'ai-gemini...'. Routing to AISearchAdapter.`);
-        return await adapters.aiSearch.getFullStockData(ticker);
+        console.log(`[SERVICE:DataSourceRouter] SourceID is 'polygon-api'. Routing to PolygonAdapter.`);
+        return await adapters.polygon.getFullStockData(ticker); // No TA config or API delay passed
       default:
-        // This case should ideally not be reached if dataSourceId is strictly typed and validated upstream.
-        const unknownSourceErrorMsg = `Invalid or unsupported data source ID: ${dataSourceId}`;
+        const unknownSourceErrorMsg = `Invalid or unsupported API data source ID: ${dataSourceId}`;
         console.error(`[SERVICE:DataSourceRouter] ${unknownSourceErrorMsg}`);
         return {
           stockDataJson: { ...EMPTY_STOCK_DATA_JSON },
@@ -58,10 +44,10 @@ export async function fetchStockDataFromSource(
         };
     }
   } catch (e: any) {
-    const criticalErrorMsg = `Critical error in data source router for ${ticker} (${dataSourceId}/${mode}): ${e.message || 'Unknown error'}`;
+    const criticalErrorMsg = `Critical error in data source router for ${ticker} (${dataSourceId}): ${e.message || 'Unknown error'}`;
     console.error(`[SERVICE:DataSourceRouter] ${criticalErrorMsg}`, e);
     return {
-      stockDataJson: { ...EMPTY_STOCK_DATA_JSON }, // Return an error structure
+      stockDataJson: { ...EMPTY_STOCK_DATA_JSON },
       error: criticalErrorMsg,
     };
   }

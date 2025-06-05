@@ -26,4 +26,3 @@ export const examplePrompts: ExamplePrompt[] = [
     promptText: "Please provide 5 additional holistic key takeaways based on all the provided stock data and analysis. You can decide which areas to focus on for these additional points to give a broader perspective." 
   },
 ];
-
