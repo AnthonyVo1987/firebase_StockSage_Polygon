@@ -12,9 +12,9 @@ import {
 } from '@/actions/perform-ai-analysis-action';
 import type { ChatState as ServerChatState, ChatMessage as ServerChatMessage } from '@/ai/schemas/chat-schemas';
 import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas';
+import { examplePrompts } from '@/ai/schemas/chat-prompts';
 import type { UsageReport } from '@/ai/schemas/common-schemas';
-import type { DataSourceId } from '@/services/data-sources/types'; // GranularTaConfigType removed
-// DEFAULT_GRANULAR_TA_CONFIG removed
+import type { DataSourceId } from '@/services/data-sources/types';
 
 export type AnalysisStatus = StockDataFetchState['analysisStatus'];
 
@@ -27,7 +27,7 @@ export const initialStockDataFetchState: StockDataFetchState = {
   analysisStatus: 'idle',
   tickerUsed: undefined,
   dataSourceUsed: undefined,
-  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
+  initiateFullChatAnalysis: false,
 };
 
 export const initialAiAnalysisResultState: AiAnalysisResultState = {
@@ -49,7 +49,7 @@ export interface CombinedStockAnalysisState {
   analysisStatus: AnalysisStatus;
   tickerUsed?: string;
   dataSourceUsed?: DataSourceId;
-  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
+  initiateFullChatAnalysis?: boolean;
 }
 
 export const initialCombinedStockAnalysisState: CombinedStockAnalysisState = {
@@ -69,7 +69,7 @@ export const initialCombinedStockAnalysisState: CombinedStockAnalysisState = {
   analysisStatus: 'idle',
   tickerUsed: undefined,
   dataSourceUsed: undefined,
-  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
+  initiateFullChatAnalysis: false,
 };
 
 export interface CumulativeStats {
@@ -100,6 +100,31 @@ const initialChatState: ContextChatState = {
     timestamp: Date.now(),
 };
 
+// Helper to construct analysis summary
+const constructAnalysisSummaryForChat = (currentAnalysis?: AnalyzeStockDataOutput): string | undefined => {
+  if (!currentAnalysis) return undefined;
+  const summaryParts: string[] = [];
+  const { stockPriceAction, trend, volatility, momentum, patterns } = currentAnalysis;
+
+  if (stockPriceAction && stockPriceAction.text && !stockPriceAction.text.includes("pending") && !stockPriceAction.text.includes("could not be generated")) {
+      summaryParts.push(`Price Action (${stockPriceAction.sentiment}): ${stockPriceAction.text}`);
+  }
+  if (trend && trend.text && !trend.text.includes("pending") && !trend.text.includes("could not be generated")) {
+      summaryParts.push(`Trend (${trend.sentiment}): ${trend.text}`);
+  }
+  if (volatility && volatility.text && !volatility.text.includes("pending") && !volatility.text.includes("could not be generated")) {
+      summaryParts.push(`Volatility (${volatility.sentiment}): ${volatility.text}`);
+  }
+  if (momentum && momentum.text && !momentum.text.includes("pending") && !momentum.text.includes("could not be generated")) {
+      summaryParts.push(`Momentum (${momentum.sentiment}): ${momentum.text}`);
+  }
+  if (patterns && patterns.text && !patterns.text.includes("pending") && !patterns.text.includes("could not be generated")) {
+      summaryParts.push(`Patterns (${patterns.sentiment}): ${patterns.text}`);
+  }
+  return summaryParts.length > 0 ? summaryParts.join('\\n') : undefined;
+};
+
+
 interface StockAnalysisContextType {
   stockDataFetchState: StockDataFetchState;
   aiAnalysisResultState: AiAnalysisResultState;
@@ -118,6 +143,8 @@ interface StockAnalysisContextType {
   submitChatForm: (formData: FormData) => void;
   chatFormPending: boolean;
   clearChatHistoryContext: () => void;
+  formRef: React.RefObject<HTMLFormElement> | null; // Add formRef
+  setFormRef: (ref: React.RefObject<HTMLFormElement> | null) => void; // Add setter for formRef
 }
 
 const StockAnalysisContext = createContext<StockAnalysisContextType | undefined>(undefined);
@@ -137,6 +164,10 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
 
   const [combinedServerState, setCombinedServerState] = useState<CombinedStockAnalysisState>(initialCombinedStockAnalysisState);
   const [cumulativeStats, setCumulativeStats] = useState<CumulativeStats>(initialCumulativeStats);
+  
+  const [triggerFullChatAfterAnalysis, setTriggerFullChatAfterAnalysis] = useState(false);
+  const [formRef, setFormRefState] = useState<React.RefObject<HTMLFormElement> | null>(null);
+
 
   const lastProcessedFetchTimestamp = useRef<number | undefined>();
   const lastProcessedAnalysisTimestamp = useRef<number | undefined>();
@@ -155,29 +186,43 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    console.log(`[CONTEXT:Effect:Fetch] stockDataFetchState changed. New timestamp: ${stockDataFetchState?.timestamp}, Last processed: ${lastProcessedFetchTimestamp.current}, Current context ticker: ${combinedServerState.tickerUsed}, FetchState ticker: ${stockDataFetchState?.tickerUsed}`);
+    console.log(`[CONTEXT:Effect:Fetch] stockDataFetchState changed. New timestamp: ${stockDataFetchState?.timestamp}, Last processed: ${lastProcessedFetchTimestamp.current}, Current context ticker: ${combinedServerState.tickerUsed}, FetchState ticker: ${stockDataFetchState?.tickerUsed}, InitiateFullChat: ${stockDataFetchState?.initiateFullChatAnalysis}`);
 
     if (!stockDataFetchState?.timestamp || stockDataFetchState.timestamp === lastProcessedFetchTimestamp.current) {
-      if(stockDataFetchState?.timestamp && stockDataFetchState.timestamp === lastProcessedFetchTimestamp.current) {
-        console.log(`[CONTEXT:Effect:Fetch] Skipping processing: Timestamp ${stockDataFetchState.timestamp} already processed.`);
-      } else if (!stockDataFetchState?.timestamp) {
-        console.log(`[CONTEXT:Effect:Fetch] Skipping processing: stockDataFetchState.timestamp is undefined.`);
+      if (stockDataFetchState?.timestamp === lastProcessedFetchTimestamp.current && stockDataFetchState.analysisStatus === 'data_fetching' && !fetchStockDataPending) {
+        // This can happen if the same request is processed again by useActionState on re-render but action is not pending
+        // Usually safe to ignore if no other state indicates an issue
+      } else if (stockDataFetchState?.timestamp) {
+        console.log('[CONTEXT:Effect:Fetch] Skipping processing for stockDataFetchState: Timestamp has not changed or is undefined.');
       }
       return;
     }
 
-    if (stockDataFetchState.tickerUsed !== combinedServerState.tickerUsed) {
-      console.warn(`[CONTEXT:Effect:Fetch] Stale stockDataFetchState for "${stockDataFetchState.tickerUsed}" ignored. Current operation is for "${combinedServerState.tickerUsed}". Fetch timestamp: ${stockDataFetchState.timestamp}`);
-      return;
+    if (stockDataFetchState.tickerUsed !== combinedServerState.tickerUsed && combinedServerState.analysisStatus !== 'idle' && combinedServerState.analysisStatus !== 'data_fetching') {
+        console.warn(`[CONTEXT:Effect:Fetch] Discarding stockDataFetchState update because its ticker "${stockDataFetchState.tickerUsed}" does not match current context ticker "${combinedServerState.tickerUsed}" and context is not in initial state. This may be a stale response.`);
+        return;
     }
-
+    
     console.log(`[CONTEXT:Effect:Fetch] Processing stockDataFetchState for ticker "${stockDataFetchState.tickerUsed}". Status: ${stockDataFetchState.analysisStatus}`);
     lastProcessedFetchTimestamp.current = stockDataFetchState.timestamp;
+    
+    // Set triggerFullChatAfterAnalysis based on the initiateFullChatAnalysis flag from the action
+    // This ensures it's set correctly even if the action returns quickly
+    if (stockDataFetchState.initiateFullChatAnalysis && stockDataFetchState.analysisStatus !== 'error_fetching_data') {
+        console.log(`[CONTEXT:Effect:Fetch] Setting triggerFullChatAfterAnalysis to TRUE due to initiateFullChatAnalysis flag from fetchStockDataState.`);
+        setTriggerFullChatAfterAnalysis(true);
+    } else if (stockDataFetchState.analysisStatus === 'data_fetching' && !stockDataFetchState.initiateFullChatAnalysis) {
+      // If it's a new 'standard' fetch, ensure trigger is false.
+        console.log(`[CONTEXT:Effect:Fetch] Setting triggerFullChatAfterAnalysis to FALSE for new standard fetch.`);
+        setTriggerFullChatAfterAnalysis(false);
+    }
+
 
     setCombinedServerState(prev => {
-      if (stockDataFetchState.tickerUsed !== prev.tickerUsed) {
-        console.warn(`[CONTEXT:Effect:Fetch:SetState] Stale stockDataFetchState for "${stockDataFetchState.tickerUsed}" IGNORED during setCombinedServerState. Prev ticker was "${prev.tickerUsed}". This shouldn't happen if outer checks are correct.`);
-        return prev;
+      // Ensure we are updating for the correct ticker
+      if (stockDataFetchState.tickerUsed !== prev.tickerUsed && prev.analysisStatus !== 'idle' && prev.analysisStatus !== 'data_fetching') {
+        console.warn(`[CONTEXT:Effect:Fetch:SetCombined] Discarding stockDataFetchState update in setCombinedServerState because its ticker "${stockDataFetchState.tickerUsed}" does not match current prev ticker "${prev.tickerUsed}".`);
+        return prev; // Stale update, don't corrupt current state
       }
 
       return {
@@ -191,27 +236,24 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
         analysisUsageReport: stockDataFetchState.error || !stockDataFetchState.stockJson ? undefined : prev.analysisUsageReport,
         analysisStatus: stockDataFetchState.analysisStatus,
         dataSourceUsed: stockDataFetchState.dataSourceUsed,
-        // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
+        // Persist initiateFullChatAnalysis from the latest fetch action state
+        initiateFullChatAnalysis: stockDataFetchState.initiateFullChatAnalysis, 
       };
     });
 
-  }, [stockDataFetchState, combinedServerState.tickerUsed, updateCumulativeStats]);
+  }, [stockDataFetchState, combinedServerState.tickerUsed, combinedServerState.analysisStatus, fetchStockDataPending, updateCumulativeStats]);
 
 
   useEffect(() => {
     console.log(`[CONTEXT:Effect:Analysis] aiAnalysisResultState changed. New timestamp: ${aiAnalysisResultState?.timestamp}, Last processed: ${lastProcessedAnalysisTimestamp.current}, Current context ticker: ${combinedServerState.tickerUsed}, AnalysisState ticker: ${aiAnalysisResultState?.tickerAnalyzed}`);
 
     if (!aiAnalysisResultState?.timestamp || aiAnalysisResultState.timestamp === lastProcessedAnalysisTimestamp.current) {
-       if(aiAnalysisResultState?.timestamp && aiAnalysisResultState.timestamp === lastProcessedAnalysisTimestamp.current) {
-        console.log(`[CONTEXT:Effect:Analysis] Skipping processing: Timestamp ${aiAnalysisResultState.timestamp} already processed.`);
-      } else if (!aiAnalysisResultState?.timestamp) {
-        console.log(`[CONTEXT:Effect:Analysis] Skipping processing: aiAnalysisResultState.timestamp is undefined.`);
-      }
+       console.log('[CONTEXT:Effect:Analysis] Skipping processing for aiAnalysisResultState: Timestamp has not changed or is undefined.');
       return;
     }
 
     if (aiAnalysisResultState.tickerAnalyzed !== combinedServerState.tickerUsed) {
-        console.warn(`[CONTEXT:Effect:Analysis] Stale AI analysis result for "${aiAnalysisResultState.tickerAnalyzed}" ignored. Current operation is for "${combinedServerState.tickerUsed}". Analysis timestamp: ${aiAnalysisResultState.timestamp}`);
+        console.warn(`[CONTEXT:Effect:Analysis] Discarding aiAnalysisResultState update because its ticker "${aiAnalysisResultState.tickerAnalyzed}" does not match current context ticker "${combinedServerState.tickerUsed}". This may be a stale response.`);
         return;
     }
     console.log(`[CONTEXT:Effect:Analysis] Processing aiAnalysisResultState for ticker "${aiAnalysisResultState.tickerAnalyzed}". Error: ${aiAnalysisResultState.error}`);
@@ -219,7 +261,7 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
 
     setCombinedServerState(prev => {
       if (aiAnalysisResultState.tickerAnalyzed !== prev.tickerUsed) {
-        console.warn(`[CONTEXT:Effect:Analysis:SetState] Stale aiAnalysisResultState for "${aiAnalysisResultState.tickerAnalyzed}" IGNORED. Prev ticker was "${prev.tickerUsed}".`);
+        console.warn(`[CONTEXT:Effect:Analysis:SetCombined] Discarding aiAnalysisResultState update in setCombinedServerState because its ticker "${aiAnalysisResultState.tickerAnalyzed}" does not match current prev ticker "${prev.tickerUsed}".`);
         return prev;
       }
       return {
@@ -228,7 +270,7 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
         analysisUsageReport: aiAnalysisResultState.analysisUsageReport,
         error: aiAnalysisResultState.error || (prev.analysisStatus === 'error_fetching_data' ? prev.error : undefined),
         analysisStatus: aiAnalysisResultState.error ? 'error_analyzing_data' : 'analysis_complete',
-        timestamp: aiAnalysisResultState.timestamp,
+        timestamp: aiAnalysisResultState.timestamp, // This should be the AI analysis timestamp
       };
     });
 
@@ -241,28 +283,29 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
   const submitFetchStockDataForm = useCallback((formData: FormData) => {
     const ticker = formData.get('ticker') as string | null;
     const dataSource = formData.get('dataSource') as string | null;
+    const analysisType = formData.get('analysisType') as string | null; // Will be 'standard' or 'fullDetail'
     const processingTicker = ticker?.trim().toUpperCase() || "NVDA";
-    // selectedIndicatorsConfigString and apiCallDelayString removed
-
-    // parsedTaConfig removed
-    // parsedApiCallDelay removed
 
     console.log(
       `[CONTEXT_REQUEST] Action: fetchStockDataAction FOR TICKER: "${processingTicker}"`,
-      { dataSource } // Only dataSource logged now
+      { dataSource, analysisType }
     );
+    
+    const isFullDetail = analysisType === 'fullDetail';
+    console.log(`[CONTEXT] submitFetchStockDataForm: analysisType from form is "${analysisType}". Setting triggerFullChatAfterAnalysis to ${isFullDetail}`);
+    setTriggerFullChatAfterAnalysis(isFullDetail); 
 
-    setCombinedServerState({
+    setCombinedServerState({ // Reset state for new request
         ...initialCombinedStockAnalysisState,
         tickerUsed: processingTicker,
         dataSourceUsed: dataSource as DataSourceId,
         analysisStatus: 'data_fetching',
         timestamp: Date.now(),
-        // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
+        initiateFullChatAnalysis: isFullDetail, // Set based on the button clicked
     });
 
-    lastProcessedFetchTimestamp.current = undefined;
-    lastProcessedAnalysisTimestamp.current = undefined;
+    lastProcessedFetchTimestamp.current = undefined; // Reset for new fetch
+    lastProcessedAnalysisTimestamp.current = undefined; // Reset for new analysis sequence
 
     startTransition(() => {
       submitFetchStockDataActionInternal(formData);
@@ -278,10 +321,10 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     );
 
     if (tickerToAnalyze !== combinedServerState.tickerUsed) {
-      console.warn(`[CONTEXT_REQUEST:AIAnalysis] Aborting AI analysis call: Form data ticker "${tickerToAnalyze}" does not match current context ticker "${combinedServerState.tickerUsed}".`);
+      console.warn(`[CONTEXT_REQUEST:AIAnalysis] Aborting AI key takeaways analysis call: Form data ticker "${tickerToAnalyze}" does not match current context ticker "${combinedServerState.tickerUsed}".`);
       setCombinedServerState(prev => ({
         ...prev,
-        error: `Analysis for ${tickerToAnalyze} aborted as context changed to ${prev.tickerUsed}. Please re-analyze ${prev.tickerUsed}.`,
+        error: `Key takeaways analysis for ${tickerToAnalyze} aborted as context changed to ${prev.tickerUsed}. Please re-analyze ${prev.tickerUsed}.`,
         analysisStatus: 'error_analyzing_data',
       }));
       return;
@@ -290,9 +333,9 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     setCombinedServerState(prev => ({
       ...prev,
       analysisStatus: 'analyzing_data',
-      error: undefined,
-      analysisUsageReport: undefined,
-      analysis: initialCombinedStockAnalysisState.analysis,
+      error: undefined, // Clear previous errors for analysis stage
+      analysisUsageReport: undefined, // Clear previous usage
+      analysis: initialCombinedStockAnalysisState.analysis, // Reset to pending
       timestamp: Date.now(),
     }));
 
@@ -335,6 +378,69 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     });
   }, [submitChatFormAction]);
 
+  // Effect to trigger full detailed chat analysis
+  useEffect(() => {
+    const analysisIsCompleteAndValid = combinedServerState.analysisStatus === 'analysis_complete' &&
+                                     !!combinedServerState.analysis &&
+                                     combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed &&
+                                     !Object.values(combinedServerState.analysis).some(takeaway => takeaway.text.includes("pending") || takeaway.text.includes("could not be generated"));
+    
+    console.log(`[CONTEXT:Effect:AutoChat] Checking conditions. triggerFullChat: ${triggerFullChatAfterAnalysis}, analysisCompleteAndValid: ${analysisIsCompleteAndValid}, chatFormPending: ${chatFormPending}, tickerUsed: ${combinedServerState.tickerUsed}, Current analysisStatus: ${combinedServerState.analysisStatus}`);
+
+    if (triggerFullChatAfterAnalysis && analysisIsCompleteAndValid && !chatFormPending && combinedServerState.tickerUsed) {
+      console.log(`[CONTEXT:Effect:AutoChat] Conditions MET for ticker "${combinedServerState.tickerUsed}". Triggering "Full Detailed Analysis" chat.`);
+
+      const fullAnalysisPrompt = examplePrompts.find(p => p.id === 'ex_full_detailed_analysis');
+      if (!fullAnalysisPrompt) {
+        console.error('[CONTEXT:Effect:AutoChat] "Full Detailed Analysis" prompt not found in examplePrompts.');
+        setTriggerFullChatAfterAnalysis(false);
+        return;
+      }
+
+      const chatFormData = new FormData();
+      chatFormData.append('userPrompt', fullAnalysisPrompt.promptText);
+
+      if (combinedServerState.stockJson) {
+        try {
+          const parsedJson = JSON.parse(combinedServerState.stockJson);
+          if (parsedJson.stockSnapshot?.ticker === combinedServerState.tickerUsed) {
+            chatFormData.append('stockJson', combinedServerState.stockJson);
+          } else {
+             console.warn(`[CONTEXT:Effect:AutoChat] Stock JSON ticker (${parsedJson.stockSnapshot?.ticker}) does not match context ticker (${combinedServerState.tickerUsed}). Not sending stockJson for auto-chat.`);
+          }
+        } catch (e) {
+          console.error("[CONTEXT:Effect:AutoChat] Error parsing stockJson for auto-chat context:", e);
+        }
+      }
+
+      const analysisSummary = constructAnalysisSummaryForChat(combinedServerState.analysis);
+      if (analysisSummary) {
+        chatFormData.append('analysisSummary', analysisSummary);
+      }
+      
+      chatFormData.append('chatHistory', JSON.stringify(chatServerState.messages || []));
+      
+      console.log('[CONTEXT:Effect:AutoChat] Submitting "Full Detailed Analysis" chat form automatically.');
+      submitChatForm(chatFormData);
+      setTriggerFullChatAfterAnalysis(false); 
+    } else if (triggerFullChatAfterAnalysis && (combinedServerState.analysisStatus === 'error_fetching_data' || combinedServerState.analysisStatus === 'error_analyzing_data')) {
+      console.warn(`[CONTEXT:Effect:AutoChat] Full detailed analysis chat aborted for "${combinedServerState.tickerUsed}" because initial analysis failed. Status: ${combinedServerState.analysisStatus}`);
+      setTriggerFullChatAfterAnalysis(false); 
+    }
+
+  }, [
+    triggerFullChatAfterAnalysis,
+    combinedServerState.analysisStatus,
+    combinedServerState.analysis,
+    combinedServerState.tickerUsed,
+    combinedServerState.stockJson,
+    aiAnalysisResultState?.tickerAnalyzed,
+    chatFormPending,
+    chatServerState.messages, 
+    submitChatForm,
+  ]);
+
+
   const clearChatHistoryContext = useCallback(() => {
     console.log('[CONTEXT] clearChatHistoryContext called. Dispatching clear signal via submitChatFormAction.');
     const dummyFormData = new FormData();
@@ -354,6 +460,10 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     }
   }, [chatServerState, updateCumulativeStats]);
 
+  const setFormRef = useCallback((ref: React.RefObject<HTMLFormElement> | null) => {
+    setFormRefState(ref);
+  }, []);
+
 
   const contextValue: StockAnalysisContextType = {
     stockDataFetchState,
@@ -369,6 +479,8 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     submitChatForm,
     chatFormPending,
     clearChatHistoryContext,
+    formRef, 
+    setFormRef,
   };
 
   return (
@@ -391,3 +503,5 @@ declare module '@/ai/schemas/common-schemas' {
     timestampForCompare?: number;
   }
 }
+
+    

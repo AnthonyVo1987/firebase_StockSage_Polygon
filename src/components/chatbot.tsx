@@ -9,12 +9,12 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { SendHorizonal, ChevronsUpDown, Loader2, Copy, Download, AlertTriangle, Zap } from 'lucide-react';
+import { SendHorizonal, ChevronsUpDown, Loader2, Copy, Download, AlertTriangle, Zap, MessageSquareText } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm'; 
 import { useStockAnalysisContext } from '@/contexts/stock-analysis-context';
-import { downloadFile, copyToClipboardUtil, getCurrentTimestampForFile, formatJsonForExport } from '@/lib/export-utils';
+import { downloadFile, copyToClipboardUtil, getCurrentTimestampForFile } from '@/lib/export-utils';
 import { formatTimestampToPacificTime } from '@/lib/date-utils';
 
 
@@ -167,23 +167,45 @@ export default function Chatbot() {
     doSubmitFormData(formData);
   };
 
-  const handleDownloadChatResponse = (contentToDownload: string | object) => {
-    const ticker = combinedServerState?.tickerUsed || 'AI_CHAT';
+  const formatChatHistoryForExport = (messages: ChatMessage[]): string => {
+    return messages.map(msg => {
+      const senderLabel = msg.sender === 'user' ? 'User' : 'AI Assistant';
+      const timestamp = formatTimestampToPacificTime(msg.timestamp);
+      let text = `${senderLabel} (${timestamp}):\n${msg.text}\n`;
+      if (msg.usageReport) {
+        text += `(Usage: In: ${msg.usageReport.inputTokens}, Out: ${msg.usageReport.outputTokens}, Cost: $${msg.usageReport.cost.toFixed(6)})\n`;
+      }
+      return text;
+    }).join('\n--------------------\n');
+  };
+
+  const handleDownloadChatHistory = () => {
+    const messagesToExport = chatServerState?.messages || [];
+    if (messagesToExport.length === 0) {
+      toast({ title: "No Chat History", description: "Nothing to export." });
+      return;
+    }
+    const contentToDownload = formatChatHistoryForExport(messagesToExport);
+    const ticker = combinedServerState?.tickerUsed || 'AI_CHAT_HISTORY';
     const timestamp = getCurrentTimestampForFile();
-    const filename = `ai-chat-response_${ticker}_${timestamp}.md`; 
-    const dataString = typeof contentToDownload === 'string' ? contentToDownload : formatJsonForExport(contentToDownload);
-    downloadFile(dataString, filename, 'text/markdown;charset=utf-8;');
+    const filename = `chat-history_${ticker}_${timestamp}.md`; 
+    downloadFile(contentToDownload, filename, 'text/markdown;charset=utf-8;');
     toast({ title: "Download Started", description: `${filename} is downloading.` });
   };
 
-  const handleCopyChatResponse = async (contentToCopy: string | object) => {
-    const textToCopy = typeof contentToCopy === 'string' ? contentToCopy : formatJsonForExport(contentToCopy);
-    await copyToClipboardUtil(textToCopy, toast, 'AI Chat Response');
+  const handleCopyChatHistory = async () => {
+    const messagesToCopy = chatServerState?.messages || [];
+    if (messagesToCopy.length === 0) {
+      toast({ title: "No Chat History", description: "Nothing to copy." });
+      return;
+    }
+    const textToCopy = formatChatHistoryForExport(messagesToCopy);
+    await copyToClipboardUtil(textToCopy, toast, 'Full Chat History');
   };
 
 
   const messagesToDisplay = chatServerState?.messages || [];
-  const latestAiMessageForControls = messagesToDisplay.filter(m => m.sender === 'ai' && !m.isError).pop();
+  const isChatHistoryAvailable = messagesToDisplay.length > 0;
   
   let stockJsonCurrentlyAvailable = false;
   if (combinedServerState?.stockJson && combinedServerState.tickerUsed) {
@@ -208,12 +230,14 @@ export default function Chatbot() {
   console.log(`[CLIENT:Chatbot] Render. Input: "${inputValue}", ChatPending: ${chatFormPending}, ContextTicker: "${combinedServerState.tickerUsed}", StockJSONAvail: ${stockJsonCurrentlyAvailable}, AnalysisAvail: ${analysisCurrentlyAvailable}, PromptsDisabled: ${examplePromptsDisabled}, AnalysisStatus: ${combinedServerState.analysisStatus}, AnalysisResultTicker: ${aiAnalysisResultState.tickerAnalyzed}`);
 
   return (
-    <Card className="mt-8 w-full max-w-4xl mx-auto shadow-xl">
+    <Card className="mt-8 w-full max-w-5xl mx-auto shadow-xl">
       <CardHeader className="pb-4">
-        <CardTitle className="text-xl font-headline text-primary">AI Chat Assistant 💬</CardTitle>
+        <CardTitle className="text-xl font-headline text-primary flex items-center">
+            <MessageSquareText className="h-6 w-6 mr-2" /> AI Chat Assistant
+        </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <ScrollArea ref={scrollAreaRef} className="h-72 w-full p-4 border-b">
+        <ScrollArea ref={scrollAreaRef} className="h-96 w-full p-4 border-b">
           <div className="space-y-4">
             {messagesToDisplay.map((msg) => (
               <div
@@ -310,14 +334,14 @@ export default function Chatbot() {
         </div>
         {(!stockJsonCurrentlyAvailable || !analysisCurrentlyAvailable) && <p className="text-xs text-muted-foreground mt-1">Tip: Analyze a stock first to enable prompt examples that use context.</p>}
       </CardFooter>
-       {latestAiMessageForControls && (
+       {isChatHistoryAvailable && (
         <div className="p-4 pt-0 border-t mt-0 flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Latest AI Response:</span>
-            <Button variant="outline" size="sm" onClick={() => handleCopyChatResponse(latestAiMessageForControls.text)} title="Copy AI Response">
-                <Copy className="h-3 w-3 mr-1.5" /> Copy
+            <span className="text-xs text-muted-foreground">Chat History Tools:</span>
+            <Button variant="outline" size="sm" onClick={handleCopyChatHistory} title="Copy Full Chat History">
+                <Copy className="h-3 w-3 mr-1.5" /> Copy All
             </Button>
-            <Button variant="outline" size="sm" onClick={() => handleDownloadChatResponse(latestAiMessageForControls.text)} title="Download AI Response as Markdown (.md)">
-                <Download className="h-3 w-3 mr-1.5" /> Export (.md)
+            <Button variant="outline" size="sm" onClick={handleDownloadChatHistory} title="Download Full Chat History as Markdown (.md)">
+                <Download className="h-3 w-3 mr-1.5" /> Export All (.md)
             </Button>
         </div>
       )}

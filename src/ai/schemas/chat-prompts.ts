@@ -25,4 +25,13 @@ export const examplePrompts: ExamplePrompt[] = [
     label: "Additional Holistic Analysis (5 Points)", 
     promptText: "Please provide 5 additional holistic key takeaways based on all the provided stock data and analysis. You can decide which areas to focus on for these additional points to give a broader perspective." 
   },
+  {
+    id: 'ex_full_detailed_analysis',
+    label: 'Full Detailed Analysis (Combined)',
+    promptText: `Based on all the provided stock JSON data and the AI analysis summary, please provide a comprehensive "Full Detailed Analysis". This single response should include:
+1. Key takeaways specifically for a stock trader (focus on price action, support/resistance if identifiable, volume implications, and short-term outlook).
+2. Key considerations for an options trader (discuss potential volatility implications and how the current trend might influence options strategies like bullish, bearish, or neutral plays).
+3. Five additional holistic key takeaways to give a broader perspective on the stock's situation.
+Ensure your entire response is well-structured and easy to read.`
+  },
 ];

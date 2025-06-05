@@ -3,7 +3,7 @@
 
 import { fetchStockDataFromSource } from '@/services/data-sources';
 import type { DataSourceId } from '@/services/data-sources/types';
-import { ALLOWED_DATA_SOURCE_IDS } from '@/services/data-sources/types'; // Removed DEFAULT_GRANULAR_TA_CONFIG
+import { ALLOWED_DATA_SOURCE_IDS } from '@/services/data-sources/types';
 import type { AdapterOutput } from '@/services/data-sources/types';
 import type { UsageReport } from '@/ai/schemas/common-schemas';
 import { z } from 'zod';
@@ -16,7 +16,7 @@ const ActionInputSchema = z.object({
   dataSource: z.enum(ALLOWED_DATA_SOURCE_IDS, {
     errorMap: () => ({ message: "Invalid API data source selected." })
   }),
-  // selectedIndicatorsConfig and apiCallDelay removed for v1.2.9
+  analysisType: z.enum(['standard', 'fullDetail']).optional(),
 });
 
 export type AnalysisStatus = 'idle' | 'data_fetching' | 'data_fetched_analysis_pending' | 'analyzing_data' | 'analysis_complete' | 'error_fetching_data' | 'error_analyzing_data';
@@ -27,14 +27,14 @@ export interface StockDataFetchState {
   fieldErrors?: {
     ticker?: string[] | undefined;
     dataSource?: string[] | undefined;
-    // selectedIndicatorsConfig and apiCallDelay field errors removed
+    analysisType?: string[] | undefined;
   };
   timestamp?: number;
   fetchUsageReport?: UsageReport;
   analysisStatus: AnalysisStatus;
   tickerUsed?: string;
   dataSourceUsed?: DataSourceId;
-  // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
+  initiateFullChatAnalysis?: boolean; // New field
 }
 
 
@@ -45,11 +45,9 @@ export async function fetchStockDataAction(
   const rawTicker = formData.get('ticker') as string | null;
   const tickerToUse = rawTicker?.trim().toUpperCase() || "NVDA";
   const dataSourceFromForm = formData.get('dataSource') as string | null;
-  // selectedIndicatorsConfigString and apiCallDelayString removed
+  const analysisTypeFromForm = formData.get('analysisType') as string | null;
 
-  console.log(`[ACTION:FetchStockDataAction] Processing for ticker: "${tickerToUse}", DataSource: ${dataSourceFromForm}`);
-
-  // parsedTaConfig removed
+  console.log(`[ACTION:FetchStockDataAction] Processing for ticker: "${tickerToUse}", DataSource: ${dataSourceFromForm}, AnalysisType: ${analysisTypeFromForm}`);
 
   const currentActionRunState: StockDataFetchState = {
     stockJson: undefined,
@@ -60,13 +58,13 @@ export async function fetchStockDataAction(
     analysisStatus: 'data_fetching',
     tickerUsed: tickerToUse,
     dataSourceUsed: dataSourceFromForm as DataSourceId,
-    // selectedIndicatorsConfigUsed and apiCallDelayUsed removed
+    initiateFullChatAnalysis: analysisTypeFromForm === 'fullDetail',
   };
 
   const validatedFields = ActionInputSchema.safeParse({
     ticker: tickerToUse,
     dataSource: dataSourceFromForm,
-    // selectedIndicatorsConfig and apiCallDelay removed from validation
+    analysisType: analysisTypeFromForm || 'standard',
   });
 
   if (!validatedFields.success) {
@@ -81,8 +79,6 @@ export async function fetchStockDataAction(
   console.log(`[ACTION:FetchStockDataAction] Input validation successful for "${tickerToUse}":`, validatedFields.data);
 
   const { ticker, dataSource } = validatedFields.data;
-  // validatedApiCallDelay removed
-  // finalSelectedTaConfig removed
   
   let fetchUsageReport: UsageReport | undefined;
 
@@ -91,7 +87,6 @@ export async function fetchStockDataAction(
     const adapterOutput: AdapterOutput = await fetchStockDataFromSource(
       ticker,
       dataSource as DataSourceId
-      // No TA config or API delay passed for v1.2.9
     );
 
     fetchUsageReport = adapterOutput.usageReport;
@@ -148,7 +143,7 @@ export async function fetchStockDataAction(
       fetchUsageReport,
       analysisStatus: 'data_fetched_analysis_pending',
     };
-    console.log(`[ACTION:FetchStockDataAction] For "${ticker}", returning successful data fetch state. AI Analysis pending.`);
+    console.log(`[ACTION:FetchStockDataAction] For "${ticker}", returning successful data fetch state. AI Analysis pending. InitiateFullChatAnalysis: ${successState.initiateFullChatAnalysis}`);
     return successState;
 
   } catch (e: any) {

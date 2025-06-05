@@ -9,27 +9,61 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-// Accordion and Checkbox imports removed for v1.2.9
-import { Loader2, AlertCircle, FileJson2, Brain, Database, Sparkles, BarChart3, TrendingUp, Zap, Search, Info, Clock } from 'lucide-react'; // Settings, ChevronsUpDown removed
+import { Loader2, AlertCircle, FileJson2, Brain, Database, Sparkles, BarChart3, TrendingUp, Zap, Search, Info, Clock, Wand2 } from 'lucide-react';
 import DebugConsole from '@/components/debug-console';
 import Chatbot from '@/components/chatbot';
 import { useToast } from "@/hooks/use-toast";
 import type { TakeawaySentiment, AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas';
-import type { StockSnapshotData, DataSourceId } from '@/services/data-sources/types'; // GranularTaConfigType removed
-// DEFAULT_GRANULAR_TA_CONFIG removed
+import type { StockSnapshotData, DataSourceId } from '@/services/data-sources/types';
 import { StockAnalysisProvider, useStockAnalysisContext, initialCombinedStockAnalysisState } from '@/contexts/stock-analysis-context';
 import DataExportControls from '@/components/data-export-controls';
 import type { CombinedStockAnalysisState, AnalysisStatus } from '@/contexts/stock-analysis-context';
 
 
-function AnalyzeStockButton() {
-  const { fetchStockDataPending, combinedServerState } = useStockAnalysisContext();
-  const isLoading = fetchStockDataPending || combinedServerState.analysisStatus === 'data_fetching' || combinedServerState.analysisStatus === 'analyzing_data';
+function AnalyzeStockButtonsInternal() {
+  const { 
+    fetchStockDataPending, 
+    performAiAnalysisPending, 
+    combinedServerState, 
+    chatFormPending,
+    submitFetchStockDataForm, // Get the submit function from context
+    formRef // Get the formRef from context if it's provided, or pass it down
+  } = useStockAnalysisContext();
+
+  const isLoading = fetchStockDataPending || performAiAnalysisPending || combinedServerState.analysisStatus === 'data_fetching' || combinedServerState.analysisStatus === 'analyzing_data';
+  
+  const handleAnalyzeClick = (analysisType: 'standard' | 'fullDetail') => {
+    if (formRef?.current) {
+      const formData = new FormData(formRef.current);
+      formData.set('analysisType', analysisType); // Explicitly set analysisType
+      console.log(`[CLIENT:StockPageContent] Button clicked for analysisType: "${analysisType}". FormData being submitted:`, Object.fromEntries(formData));
+      submitFetchStockDataForm(formData);
+    } else {
+      console.error("[CLIENT:StockPageContent] Form reference is not available for submission.");
+    }
+  };
+
   return (
-    <Button type="submit" name="analysisMode" value="live" disabled={isLoading} className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground">
-      {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-      Analyze Stock
-    </Button>
+    <>
+      <Button 
+        type="button" // Changed from "submit"
+        onClick={() => handleAnalyzeClick('standard')}
+        disabled={isLoading || chatFormPending} 
+        className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground"
+      >
+        {isLoading && combinedServerState.analysisStatus !== 'analyzing_data' && !combinedServerState.initiateFullChatAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+        Analyze Stock
+      </Button>
+      <Button 
+        type="button" // Changed from "submit"
+        onClick={() => handleAnalyzeClick('fullDetail')}
+        disabled={isLoading || chatFormPending} 
+        className="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white"
+      >
+        {isLoading && combinedServerState.initiateFullChatAnalysis && (combinedServerState.analysisStatus === 'data_fetching' || combinedServerState.analysisStatus === 'analyzing_data') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+        AI Full Stock Analysis
+      </Button>
+    </>
   );
 }
 
@@ -103,32 +137,38 @@ function KeyMetricsDisplay({ snapshotData, analysisStatus, requestedTicker }: { 
   );
 }
 
-// TA config related states and functions removed for v1.2.9
 
 function StockAnalysisPageContent() {
   const {
     combinedServerState,
-    submitFetchStockDataForm,
     submitPerformAiAnalysisForm,
     performAiAnalysisPending,
     fetchStockDataPending,
     cumulativeStats,
     stockDataFetchState,
     aiAnalysisResultState,
+    setFormRef, // Get setFormRef from context
   } = useStockAnalysisContext();
 
-  const formRef = useRef<HTMLFormElement>(null);
+  const localFormRef = useRef<HTMLFormElement>(null); // Local ref for the form
   const tickerInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const [isConsoleDocked, setIsConsoleDocked] = useState(false);
   const [selectedDataSource, setSelectedDataSource] = useState<string>(DATA_SOURCES[0].value);
-  // granularTaConfig, apiCallDelay, isSettingsExpanded states removed
 
   const lastToastForFetchErrorTimestampRef = useRef<number | undefined>();
   const lastToastForAnalysisErrorTimestampRef = useRef<number | undefined>();
   const lastToastForAnalysisSuccessTimestampRef = useRef<number | undefined>();
 
-  // handleTaConfigChange, handleMacdConfigChange, toggleAllTaFamily, handleApiDelayChange, validateAndApplyApiDelay removed
+  useEffect(() => {
+    if (localFormRef.current) {
+      setFormRef(localFormRef); // Pass the form ref to the context
+    }
+    return () => {
+        setFormRef(null); // Clear the ref on unmount
+    }
+  }, [setFormRef]);
+
 
   useEffect(() => {
     const currentContextTicker = combinedServerState.tickerUsed;
@@ -142,7 +182,7 @@ function StockAnalysisPageContent() {
       stockDataFetchStateMatchesContext &&
       !performAiAnalysisPending
     ) {
-      console.log(`[CLIENT:StockPageContent:Effect:TriggerAI] Conditions MET for ticker "${currentContextTicker}". Triggering AI analysis.`);
+      console.log(`[CLIENT:StockPageContent:Effect:TriggerAIKeyTakeaways] Conditions MET for ticker "${currentContextTicker}". Triggering AI key takeaways analysis.`);
       const analysisFormData = new FormData();
       analysisFormData.append('stockJsonString', combinedServerState.stockJson!);
       analysisFormData.append('ticker', currentContextTicker);
@@ -178,7 +218,9 @@ function StockAnalysisPageContent() {
         } else if ( combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.analysis && aiAnalysisResultState.timestamp !== lastToastForAnalysisSuccessTimestampRef.current &&
             !Object.values(combinedServerState.analysis).some(takeaway => takeaway.text.includes("pending"))
         ) {
-            toast({ title: `AI Analysis Complete for ${combinedServerState.tickerUsed}`, description: "AI takeaways have been generated." });
+            if (!combinedServerState.initiateFullChatAnalysis) { // Only toast for key takeaways if not part of full analysis flow
+              toast({ title: `AI Key Takeaways Complete for ${combinedServerState.tickerUsed}`, description: "AI key takeaways have been generated." });
+            }
             lastToastForAnalysisSuccessTimestampRef.current = aiAnalysisResultState.timestamp;
         }
     }
@@ -217,7 +259,7 @@ function StockAnalysisPageContent() {
         inputs: {
           requestedTicker: combinedServerState.tickerUsed,
           dataSource: combinedServerState.dataSourceUsed,
-          // selectedTaConfig and apiCallDelay removed for v1.2.9
+          analysisTypeInitiated: combinedServerState.initiateFullChatAnalysis ? 'fullDetail' : 'standard',
         },
         results: {
           fetchTimestamp: (stockDataFetchState?.timestamp && stockDataFetchState.tickerUsed === combinedServerState.tickerUsed)
@@ -246,8 +288,8 @@ function StockAnalysisPageContent() {
   };
 
   let displayStockJson = "Enter ticker and click analyze.";
-  const isDataFetching = fetchStockDataPending;
-  const isAnalysisLoading = combinedServerState.analysisStatus === 'analyzing_data' || combinedServerState.analysisStatus === 'data_fetched_analysis_pending';
+  const isDataFetching = fetchStockDataPending || combinedServerState.analysisStatus === 'data_fetching';
+  const isKeyTakeawaysLoading = performAiAnalysisPending || combinedServerState.analysisStatus === 'data_fetched_analysis_pending' || combinedServerState.analysisStatus === 'analyzing_data';
 
   if (isDataFetching) {
     displayStockJson = `Fetching data for ${combinedServerState.tickerUsed || 'ticker'}...`;
@@ -283,7 +325,7 @@ function StockAnalysisPageContent() {
   return (
     <>
       <main className={`flex-grow ${mainContentPaddingClass}`}>
-        <Card className="w-full max-w-4xl mx-auto shadow-xl">
+        <Card className="w-full max-w-5xl mx-auto shadow-xl">
           <CardHeader>
             <CardTitle className="text-2xl font-headline text-primary">Stock Ticker Analysis</CardTitle>
             <CardDescription>
@@ -293,17 +335,9 @@ function StockAnalysisPageContent() {
           </CardHeader>
           <CardContent className="space-y-6">
             <form
-                onSubmit={(e) => {
-                    e.preventDefault();
-                    if (formRef.current) {
-                        const formData = new FormData(formRef.current);
-                        // Removed TA config and API delay appending for v1.2.9
-                        console.log('[CLIENT:StockPageContent] Stock analysis form submission initiated.');
-                        submitFetchStockDataForm(formData);
-                    }
-                }}
-              ref={formRef}
+              ref={localFormRef} // Use the local ref here
               className="space-y-4"
+              // Removed onSubmit from form tag
             >
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -347,10 +381,8 @@ function StockAnalysisPageContent() {
                 </div>
               </div>
 
-              {/* Accordion for Advanced Settings removed for v1.2.9 */}
-
               <div className="flex flex-col sm:flex-row gap-2 items-center">
-                <AnalyzeStockButton />
+                <AnalyzeStockButtonsInternal /> {/* Use the internal component */}
               </div>
             </form>
 
@@ -407,8 +439,7 @@ function StockAnalysisPageContent() {
                     </div>
                     <CardDescription>
                       Data from {DATA_SOURCES.find(ds => ds.value === combinedServerState.dataSourceUsed)?.label || 'selected API source'}.
-                      {/* API Delay mention removed for v1.2.9 */}
-                      {(isAnalysisLoading && !isDataFetching) && " AI analysis in progress..."}
+                      {(isKeyTakeawaysLoading && !isDataFetching) && " AI key takeaways analysis in progress..."}
                     </CardDescription>
                       <DataExportControls
                         data={(parsedSnapshotData?.ticker === combinedServerState.tickerUsed && combinedServerState.stockJson) ? combinedServerState.stockJson : "{}"}
@@ -438,22 +469,22 @@ function StockAnalysisPageContent() {
                                 AI Key Takeaways
                                 {combinedServerState.tickerUsed && ` for ${combinedServerState.tickerUsed}`}
                             </CardTitle>
-                            {isAnalysisLoading && <Loader2 className="h-5 w-5 text-accent animate-spin" />}
+                            {isKeyTakeawaysLoading && <Loader2 className="h-5 w-5 text-accent animate-spin" />}
                         </div>
                       <CardDescription>Analysis based on the stock snapshot and technical indicators, with sentiment coloring.</CardDescription>
                         <DataExportControls
                           data={currentAnalysisToDisplay}
                           baseFilename="ai-analysis"
                           titleForTextAndCsv={`AI Key Takeaways for ${combinedServerState.tickerUsed || 'N/A'}`}
-                          isAvailable={hasValidAnalysisForUIDisplay && !isAnalysisLoading}
+                          isAvailable={hasValidAnalysisForUIDisplay && !isKeyTakeawaysLoading}
                           getTickerSymbolForFilename={getTickerSymbolForFilename}
                           dataTypeHintForCsv="analysis"
                         />
                     </CardHeader>
                     <CardContent className="space-y-3 text-sm">
-                      {isAnalysisLoading && (
+                      {isKeyTakeawaysLoading && (
                         <div className="flex items-center text-muted-foreground">
-                            <Clock className="h-4 w-4 mr-2 animate-pulse"/> AI analysis is currently in progress for {combinedServerState.tickerUsed || "the requested stock"}...
+                            <Clock className="h-4 w-4 mr-2 animate-pulse"/> AI key takeaways analysis is currently in progress for {combinedServerState.tickerUsed || "the requested stock"}...
                         </div>
                       )}
                       {hasValidAnalysisForUIDisplay && currentAnalysisToDisplay && (
@@ -480,12 +511,12 @@ function StockAnalysisPageContent() {
                           </div>
                         </>
                       )}
-                      {!isAnalysisLoading && !hasValidAnalysisForUIDisplay && combinedServerState.analysisStatus === 'error_analyzing_data' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed && (
-                        <p className="text-sm text-destructive">AI analysis could not be completed due to an error for {combinedServerState.tickerUsed}. Please check the console for details.</p>
+                      {!isKeyTakeawaysLoading && !hasValidAnalysisForUIDisplay && combinedServerState.analysisStatus === 'error_analyzing_data' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed && (
+                        <p className="text-sm text-destructive">AI key takeaways analysis could not be completed due to an error for {combinedServerState.tickerUsed}. Please check the console for details.</p>
                       )}
-                      {!isAnalysisLoading && !hasValidAnalysisForUIDisplay &&
+                      {!isKeyTakeawaysLoading && !hasValidAnalysisForUIDisplay &&
                         (combinedServerState.analysisStatus === 'data_fetched_analysis_pending' || (combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.tickerUsed !== aiAnalysisResultState?.tickerAnalyzed)) && (
-                        <p className="text-sm text-muted-foreground">AI analysis is pending or some takeaways could not be generated yet for {combinedServerState.tickerUsed}.</p>
+                        <p className="text-sm text-muted-foreground">AI key takeaways analysis is pending or some takeaways could not be generated yet for {combinedServerState.tickerUsed}.</p>
                       )}
                     </CardContent>
                   </Card>
@@ -511,3 +542,5 @@ export default function StockAnalysisPage() {
     </StockAnalysisProvider>
   );
 }
+
+    
