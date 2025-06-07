@@ -4,7 +4,7 @@ import { TrendingUp, AlertTriangle } from 'lucide-react';
 
 export default function Home() {
   const disclaimerText = "⚠️ StockSage is for demonstration purposes only. AI responses are for informational purposes and not financial advice. Always consult with a qualified financial advisor.";
-  const appVersion = "1.2.11"; // Define the version here
+  const appVersion = "1.2.12"; // Updated version to 1.2.12
 
   return (
     <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 flex flex-col">

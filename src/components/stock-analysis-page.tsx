@@ -23,19 +23,20 @@ import type { CombinedStockAnalysisState, AnalysisStatus } from '@/contexts/stoc
 function AnalyzeStockButtonsInternal() {
   const { 
     fetchStockDataPending, 
-    performAiAnalysisPending, 
+    performAiAnalysisPending,
+    calculateAiTaPending,
     combinedServerState, 
     chatFormPending,
-    submitFetchStockDataForm, // Get the submit function from context
-    formRef // Get the formRef from context if it's provided, or pass it down
+    submitFetchStockDataForm, 
+    formRef 
   } = useStockAnalysisContext();
 
-  const isLoading = fetchStockDataPending || performAiAnalysisPending || combinedServerState.analysisStatus === 'data_fetching' || combinedServerState.analysisStatus === 'analyzing_data';
+  const isLoading = fetchStockDataPending || calculateAiTaPending || performAiAnalysisPending || combinedServerState.analysisStatus === 'data_fetching' || combinedServerState.analysisStatus === 'calculating_ai_ta' || combinedServerState.analysisStatus === 'analyzing_data';
   
   const handleAnalyzeClick = (analysisType: 'standard' | 'fullDetail') => {
     if (formRef?.current) {
       const formData = new FormData(formRef.current);
-      formData.set('analysisType', analysisType); // Explicitly set analysisType
+      formData.set('analysisType', analysisType); 
       console.log(`[CLIENT:StockPageContent] Button clicked for analysisType: "${analysisType}". FormData being submitted:`, Object.fromEntries(formData));
       submitFetchStockDataForm(formData);
     } else {
@@ -46,21 +47,21 @@ function AnalyzeStockButtonsInternal() {
   return (
     <>
       <Button 
-        type="button" // Changed from "submit"
+        type="button" 
         onClick={() => handleAnalyzeClick('standard')}
         disabled={isLoading || chatFormPending} 
         className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground"
       >
-        {isLoading && combinedServerState.analysisStatus !== 'analyzing_data' && !combinedServerState.initiateFullChatAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+        {isLoading && combinedServerState.analysisStatus !== 'analyzing_data' && combinedServerState.analysisStatus !== 'calculating_ai_ta' && !combinedServerState.initiateFullChatAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
         Analyze Stock
       </Button>
       <Button 
-        type="button" // Changed from "submit"
+        type="button" 
         onClick={() => handleAnalyzeClick('fullDetail')}
         disabled={isLoading || chatFormPending} 
         className="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white"
       >
-        {isLoading && combinedServerState.initiateFullChatAnalysis && (combinedServerState.analysisStatus === 'data_fetching' || combinedServerState.analysisStatus === 'analyzing_data') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+        {isLoading && combinedServerState.initiateFullChatAnalysis && (combinedServerState.analysisStatus === 'data_fetching' || combinedServerState.analysisStatus === 'calculating_ai_ta' || combinedServerState.analysisStatus === 'analyzing_data') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
         AI Full Stock Analysis
       </Button>
     </>
@@ -91,7 +92,7 @@ function KeyMetricsDisplay({ snapshotData, analysisStatus, requestedTicker }: { 
     return null;
   }
   if (!snapshotData.day || snapshotData.day.c === undefined || snapshotData.todaysChangePerc === undefined) {
-    if (analysisStatus === 'data_fetched_analysis_pending' || analysisStatus === 'analyzing_data') {
+    if (analysisStatus === 'data_fetched_ai_ta_pending' || analysisStatus === 'calculating_ai_ta' || analysisStatus === 'ai_ta_calculated_key_takeaways_pending' || analysisStatus === 'analyzing_data') {
         return <p className="text-sm text-muted-foreground text-center my-4">Loading key metrics for {requestedTicker}...</p>;
     }
     console.warn(`[CLIENT:KeyMetricsDisplay] Snapshot data for ${requestedTicker} is present but missing 'day.c' or 'todaysChangePerc'.`);
@@ -141,68 +142,45 @@ function KeyMetricsDisplay({ snapshotData, analysisStatus, requestedTicker }: { 
 function StockAnalysisPageContent() {
   const {
     combinedServerState,
-    submitPerformAiAnalysisForm,
     performAiAnalysisPending,
     fetchStockDataPending,
+    calculateAiTaPending,
     cumulativeStats,
     stockDataFetchState,
+    aiCalculatedTaState,
     aiAnalysisResultState,
-    setFormRef, // Get setFormRef from context
+    setFormRef, 
+    submitFetchStockDataForm,
   } = useStockAnalysisContext();
 
-  const localFormRef = useRef<HTMLFormElement>(null); // Local ref for the form
+  const localFormRef = useRef<HTMLFormElement>(null); 
   const tickerInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const [isConsoleDocked, setIsConsoleDocked] = useState(false);
   const [selectedDataSource, setSelectedDataSource] = useState<string>(DATA_SOURCES[0].value);
 
   const lastToastForFetchErrorTimestampRef = useRef<number | undefined>();
+  const lastToastForAiTaCalcErrorTimestampRef = useRef<number | undefined>();
   const lastToastForAnalysisErrorTimestampRef = useRef<number | undefined>();
   const lastToastForAnalysisSuccessTimestampRef = useRef<number | undefined>();
 
+
   useEffect(() => {
     if (localFormRef.current) {
-      setFormRef(localFormRef); // Pass the form ref to the context
+      setFormRef(localFormRef); 
     }
     return () => {
-        setFormRef(null); // Clear the ref on unmount
+        setFormRef(null); 
     }
   }, [setFormRef]);
 
 
   useEffect(() => {
-    const currentContextTicker = combinedServerState.tickerUsed;
-    const stockJsonAvailable = !!combinedServerState.stockJson;
-    const stockDataFetchStateMatchesContext = stockDataFetchState?.tickerUsed === currentContextTicker;
-
-    if (
-      combinedServerState.analysisStatus === 'data_fetched_analysis_pending' &&
-      stockJsonAvailable &&
-      currentContextTicker &&
-      stockDataFetchStateMatchesContext &&
-      !performAiAnalysisPending
-    ) {
-      console.log(`[CLIENT:StockPageContent:Effect:TriggerAIKeyTakeaways] Conditions MET for ticker "${currentContextTicker}". Triggering AI key takeaways analysis.`);
-      const analysisFormData = new FormData();
-      analysisFormData.append('stockJsonString', combinedServerState.stockJson!);
-      analysisFormData.append('ticker', currentContextTicker);
-      submitPerformAiAnalysisForm(analysisFormData);
-    }
-  }, [
-    combinedServerState.analysisStatus,
-    combinedServerState.stockJson,
-    combinedServerState.tickerUsed,
-    stockDataFetchState,
-    performAiAnalysisPending,
-    submitPerformAiAnalysisForm,
-  ]);
-
-  useEffect(() => {
-    if (stockDataFetchState && stockDataFetchState.timestamp && stockDataFetchState.timestamp !== lastToastForFetchErrorTimestampRef.current) {
-        if (stockDataFetchState.analysisStatus === 'error_fetching_data' && stockDataFetchState.error && stockDataFetchState.tickerUsed === combinedServerState.tickerUsed) {
+    if (stockDataFetchState?.timestamp && stockDataFetchState.timestamp !== lastToastForFetchErrorTimestampRef.current && stockDataFetchState.tickerUsed === combinedServerState.tickerUsed) {
+        if (stockDataFetchState.analysisStatus === 'error_fetching_data' && stockDataFetchState.error) {
             toast({ variant: "destructive", title: `Data Fetch Error for ${stockDataFetchState.tickerUsed}`, description: stockDataFetchState.error });
             lastToastForFetchErrorTimestampRef.current = stockDataFetchState.timestamp;
-        } else if (stockDataFetchState.fieldErrors && stockDataFetchState.analysisStatus === 'error_fetching_data' && stockDataFetchState.tickerUsed === combinedServerState.tickerUsed) {
+        } else if (stockDataFetchState.fieldErrors && stockDataFetchState.analysisStatus === 'error_fetching_data') {
             const firstErrorField = Object.keys(stockDataFetchState.fieldErrors)[0] as keyof typeof stockDataFetchState.fieldErrors;
             if (firstErrorField && stockDataFetchState.fieldErrors[firstErrorField]) {
                 toast({ variant: "destructive", title: `${firstErrorField.charAt(0).toUpperCase() + firstErrorField.slice(1)} Error`, description: stockDataFetchState.fieldErrors[firstErrorField]!.join(', ') });
@@ -210,21 +188,30 @@ function StockAnalysisPageContent() {
             }
         }
     }
-
-    if (aiAnalysisResultState && aiAnalysisResultState.timestamp && aiAnalysisResultState.tickerAnalyzed === combinedServerState.tickerUsed) {
-        if (combinedServerState.analysisStatus === 'error_analyzing_data' && combinedServerState.error && aiAnalysisResultState.timestamp !== lastToastForAnalysisErrorTimestampRef.current) {
-            toast({ variant: "destructive", title: `AI Analysis Error for ${combinedServerState.tickerUsed}`, description: combinedServerState.error });
-            lastToastForAnalysisErrorTimestampRef.current = aiAnalysisResultState.timestamp;
-        } else if ( combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.analysis && aiAnalysisResultState.timestamp !== lastToastForAnalysisSuccessTimestampRef.current &&
-            !Object.values(combinedServerState.analysis).some(takeaway => takeaway.text.includes("pending"))
-        ) {
-            if (!combinedServerState.initiateFullChatAnalysis) { // Only toast for key takeaways if not part of full analysis flow
-              toast({ title: `AI Key Takeaways Complete for ${combinedServerState.tickerUsed}`, description: "AI key takeaways have been generated." });
-            }
-            lastToastForAnalysisSuccessTimestampRef.current = aiAnalysisResultState.timestamp;
+    
+    if (aiCalculatedTaState?.timestamp && aiCalculatedTaState.timestamp !== lastToastForAiTaCalcErrorTimestampRef.current && aiCalculatedTaState.tickerAnalyzed === combinedServerState.tickerUsed) {
+        if (combinedServerState.analysisStatus === 'error_calculating_ai_ta' && combinedServerState.error) {
+             toast({ variant: "destructive", title: `AI TA Calculation Error for ${combinedServerState.tickerUsed}`, description: combinedServerState.error });
+            lastToastForAiTaCalcErrorTimestampRef.current = aiCalculatedTaState.timestamp;
         }
     }
-  }, [combinedServerState, stockDataFetchState, aiAnalysisResultState, toast]);
+
+    if (aiAnalysisResultState?.timestamp && aiAnalysisResultState.timestamp !== lastToastForAnalysisErrorTimestampRef.current && aiAnalysisResultState.tickerAnalyzed === combinedServerState.tickerUsed) {
+        if (combinedServerState.analysisStatus === 'error_analyzing_data' && combinedServerState.error) {
+            toast({ variant: "destructive", title: `AI Key Takeaways Error for ${combinedServerState.tickerUsed}`, description: combinedServerState.error });
+            lastToastForAnalysisErrorTimestampRef.current = aiAnalysisResultState.timestamp;
+        }
+    }
+    if (aiAnalysisResultState?.timestamp && aiAnalysisResultState.timestamp !== lastToastForAnalysisSuccessTimestampRef.current && combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.analysis && combinedServerState.tickerUsed === aiAnalysisResultState.tickerAnalyzed &&
+        !Object.values(combinedServerState.analysis).some(takeaway => takeaway.text.includes("pending"))
+    ) {
+        if (!combinedServerState.initiateFullChatAnalysis) { 
+            toast({ title: `AI Key Takeaways Complete for ${combinedServerState.tickerUsed}`, description: "AI key takeaways have been generated." });
+        }
+        lastToastForAnalysisSuccessTimestampRef.current = aiAnalysisResultState.timestamp;
+    }
+
+  }, [combinedServerState, stockDataFetchState, aiCalculatedTaState, aiAnalysisResultState, toast]);
 
 
   const parsedSnapshotData = useMemo(() => {
@@ -265,11 +252,17 @@ function StockAnalysisPageContent() {
           fetchTimestamp: (stockDataFetchState?.timestamp && stockDataFetchState.tickerUsed === combinedServerState.tickerUsed)
               ? new Date(stockDataFetchState.timestamp).toISOString()
               : undefined,
-          analysisTimestamp: (aiAnalysisResultState?.timestamp && aiAnalysisResultState.tickerAnalyzed === combinedServerState.tickerUsed)
+          aiTaCalculationTimestamp: (aiCalculatedTaState?.timestamp && aiCalculatedTaState.tickerAnalyzed === combinedServerState.tickerUsed)
+              ? new Date(aiCalculatedTaState.timestamp).toISOString()
+              : undefined,
+          keyTakeawaysAnalysisTimestamp: (aiAnalysisResultState?.timestamp && aiAnalysisResultState.tickerAnalyzed === combinedServerState.tickerUsed)
               ? new Date(aiAnalysisResultState.timestamp).toISOString()
               : undefined,
           stockAndTAData: stockJsonParsed,
-          aiAnalysis: (combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed)
+          aiCalculatedTechnicalIndicators: (combinedServerState.calculatedAiTaObject && combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed)
+              ? combinedServerState.calculatedAiTaObject
+              : undefined,
+          aiKeyTakeaways: (combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed)
               ? combinedServerState.analysis
               : initialCombinedStockAnalysisState.analysis,
         },
@@ -277,7 +270,10 @@ function StockAnalysisPageContent() {
           fetchUsageReport: (stockDataFetchState?.fetchUsageReport && stockDataFetchState.tickerUsed === combinedServerState.tickerUsed)
             ? stockDataFetchState.fetchUsageReport
             : undefined,
-          analysisUsageReport: (combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed)
+          aiCalculatedTaUsageReport: (combinedServerState.aiCalculatedTaUsageReport && combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed)
+            ? combinedServerState.aiCalculatedTaUsageReport
+            : undefined,
+          keyTakeawaysUsageReport: (combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed)
               ? combinedServerState.analysisUsageReport
               : undefined,
         },
@@ -289,8 +285,7 @@ function StockAnalysisPageContent() {
 
   let displayStockJson = "Enter ticker and click analyze.";
   const isDataFetching = fetchStockDataPending || combinedServerState.analysisStatus === 'data_fetching';
-  const isKeyTakeawaysLoading = performAiAnalysisPending || combinedServerState.analysisStatus === 'data_fetched_analysis_pending' || combinedServerState.analysisStatus === 'analyzing_data';
-
+  
   if (isDataFetching) {
     displayStockJson = `Fetching data for ${combinedServerState.tickerUsed || 'ticker'}...`;
   } else if (combinedServerState.stockJson && parsedSnapshotData?.ticker === combinedServerState.tickerUsed) {
@@ -300,13 +295,36 @@ function StockAnalysisPageContent() {
     } catch (e) {
       displayStockJson = combinedServerState.stockJson;
     }
-  } else if (combinedServerState.error && combinedServerState.analysisStatus === 'error_fetching_data' && !combinedServerState.fieldErrors) {
+  } else if (combinedServerState.error && combinedServerState.analysisStatus === 'error_fetching_data' && !combinedServerState.fieldErrors && combinedServerState.tickerUsed === stockDataFetchState?.tickerUsed) {
     displayStockJson = `Error fetching data for "${combinedServerState.tickerUsed || 'ticker'}": ${combinedServerState.error}`;
   } else if (combinedServerState.fieldErrors) {
     displayStockJson = `Invalid input. Please correct the errors above and try again.`;
   } else if (combinedServerState.tickerUsed && combinedServerState.analysisStatus !== 'idle' && !combinedServerState.stockJson) {
     displayStockJson = `Awaiting data for ${combinedServerState.tickerUsed}...`;
   }
+
+  let displayAiCalculatedTaJson = "AI Calculated Technical Indicators will appear here after Polygon data is fetched.";
+  const isCalculatingAiTa = calculateAiTaPending || combinedServerState.analysisStatus === 'calculating_ai_ta';
+
+  if (isCalculatingAiTa) {
+    displayAiCalculatedTaJson = `Calculating AI Technical Indicators for ${combinedServerState.tickerUsed || 'ticker'}...`;
+  } else if (combinedServerState.calculatedAiTaJson && combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed) {
+    try {
+      const parsed = JSON.parse(combinedServerState.calculatedAiTaJson);
+      displayAiCalculatedTaJson = JSON.stringify(parsed, null, 2);
+    } catch (e) {
+      displayAiCalculatedTaJson = combinedServerState.calculatedAiTaJson; 
+    }
+  } else if (combinedServerState.analysisStatus === 'error_calculating_ai_ta' && combinedServerState.error && combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed) {
+    displayAiCalculatedTaJson = `Error calculating AI Technical Indicators for "${combinedServerState.tickerUsed || 'ticker'}": ${combinedServerState.error}`;
+  } else if (combinedServerState.analysisStatus === 'data_fetched_ai_ta_pending' && combinedServerState.tickerUsed === stockDataFetchState?.tickerUsed) {
+      displayAiCalculatedTaJson = `Waiting to calculate AI Technical Indicators for ${combinedServerState.tickerUsed}...`;
+  } else if (combinedServerState.analysisStatus !== 'idle' && combinedServerState.analysisStatus !== 'data_fetching' && !combinedServerState.calculatedAiTaJson && combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed ) {
+     displayAiCalculatedTaJson = `AI Technical Indicators for ${combinedServerState.tickerUsed} are unavailable or calculation did not complete successfully.`;
+  }
+
+
+  const isKeyTakeawaysLoading = performAiAnalysisPending || combinedServerState.analysisStatus === 'ai_ta_calculated_key_takeaways_pending' || combinedServerState.analysisStatus === 'analyzing_data';
 
   const mainContentPaddingClass = isConsoleDocked ? 'pb-[calc(5rem+33.33vh+1rem)]' : 'pb-20';
 
@@ -315,12 +333,46 @@ function StockAnalysisPageContent() {
     : initialCombinedStockAnalysisState.analysis;
 
   const showStockJsonCard = combinedServerState.analysisStatus !== 'idle' && !combinedServerState.fieldErrors;
-  const showAiTakeawaysCard = combinedServerState.analysisStatus !== 'idle' && !combinedServerState.fieldErrors && combinedServerState.analysisStatus !== 'error_fetching_data';
+  
+  const showAiTaCard =
+    combinedServerState.analysisStatus !== 'idle' &&
+    combinedServerState.analysisStatus !== 'data_fetching' &&
+    !combinedServerState.fieldErrors && 
+    combinedServerState.tickerUsed === stockDataFetchState?.tickerUsed;
 
-  const hasValidAnalysisForUIDisplay = combinedServerState.analysisStatus === 'analysis_complete' &&
+  const showAiKeyTakeawaysCard = 
+    combinedServerState.analysisStatus !== 'idle' && 
+    combinedServerState.analysisStatus !== 'data_fetching' &&
+    combinedServerState.analysisStatus !== 'data_fetched_ai_ta_pending' &&
+    combinedServerState.analysisStatus !== 'error_fetching_data' &&
+    !combinedServerState.fieldErrors &&
+    combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed;
+
+
+  const hasValidKeyTakeawaysForUIDisplay = combinedServerState.analysisStatus === 'analysis_complete' &&
     !!currentAnalysisToDisplay &&
     combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed &&
     !Object.values(currentAnalysisToDisplay).some(val => val.text.includes("pending"));
+  
+  const isAiTaDataAvailableForExport =
+    !!combinedServerState.calculatedAiTaObject &&
+    combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed &&
+    combinedServerState.analysisStatus !== 'calculating_ai_ta' &&
+    combinedServerState.analysisStatus !== 'error_calculating_ai_ta' &&
+    combinedServerState.analysisStatus !== 'data_fetched_ai_ta_pending' && 
+    combinedServerState.analysisStatus !== 'data_fetching';
+
+  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    console.log("[CLIENT:StockPageContent] Form submitted via Enter key or explicit submit event.");
+    if (localFormRef.current) {
+      const formData = new FormData(localFormRef.current);
+      formData.set('analysisType', 'standard'); // Default to 'standard' for Enter key submission
+      submitFetchStockDataForm(formData);
+    } else {
+      console.error("[CLIENT:StockPageContent] Form reference is not available for Enter key submission.");
+    }
+  };
 
   return (
     <>
@@ -335,9 +387,9 @@ function StockAnalysisPageContent() {
           </CardHeader>
           <CardContent className="space-y-6">
             <form
-              ref={localFormRef} // Use the local ref here
+              ref={localFormRef} 
+              onSubmit={handleFormSubmit}
               className="space-y-4"
-              // Removed onSubmit from form tag
             >
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -382,7 +434,7 @@ function StockAnalysisPageContent() {
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 items-center">
-                <AnalyzeStockButtonsInternal /> {/* Use the internal component */}
+                <AnalyzeStockButtonsInternal /> 
               </div>
             </form>
 
@@ -400,7 +452,7 @@ function StockAnalysisPageContent() {
                     data={prepareAllPageData()}
                     baseFilename="all-page-data"
                     titleForTextAndCsv="All Page Data"
-                    isAvailable={!!combinedServerState.stockJson || !!combinedServerState.error || !!combinedServerState.analysis}
+                    isAvailable={!!combinedServerState.stockJson || !!combinedServerState.error || !!combinedServerState.analysis || !!combinedServerState.calculatedAiTaJson}
                     getTickerSymbolForFilename={getTickerSymbolForFilename}
                     dataTypeHintForCsv="allPageData"
                   />
@@ -415,18 +467,27 @@ function StockAnalysisPageContent() {
                 </div>
               </div>
             )}
+             {combinedServerState.analysisStatus === 'error_calculating_ai_ta' && combinedServerState.error && combinedServerState.tickerUsed === aiCalculatedTaState?.tickerAnalyzed && (
+              <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive flex items-start">
+                <AlertCircle className="h-5 w-5 mr-2 shrink-0" />
+                <div>
+                  <p className="font-semibold">AI TA Calculation Error for {combinedServerState.tickerUsed}</p>
+                  <p className="text-sm">{combinedServerState.error}</p>
+                </div>
+              </div>
+            )}
              {combinedServerState.analysisStatus === 'error_analyzing_data' && combinedServerState.error && !combinedServerState.fieldErrors && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed && (
               <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive flex items-start">
                 <AlertCircle className="h-5 w-5 mr-2 shrink-0" />
                 <div>
-                  <p className="font-semibold">AI Analysis Error for {combinedServerState.tickerUsed}</p>
+                  <p className="font-semibold">AI Key Takeaways Error for {combinedServerState.tickerUsed}</p>
                   <p className="text-sm">{combinedServerState.error}</p>
                 </div>
               </div>
             )}
 
             {showStockJsonCard && (
-              <div className="mt-8 grid gap-6 md:grid-cols-2">
+              <div className="mt-8 grid gap-6 md:grid-cols-1">
                 <Card className="shadow-md">
                   <CardHeader>
                     <div className="flex justify-between items-center">
@@ -439,7 +500,7 @@ function StockAnalysisPageContent() {
                     </div>
                     <CardDescription>
                       Data from {DATA_SOURCES.find(ds => ds.value === combinedServerState.dataSourceUsed)?.label || 'selected API source'}.
-                      {(isKeyTakeawaysLoading && !isDataFetching) && " AI key takeaways analysis in progress..."}
+                      {(combinedServerState.analysisStatus === 'data_fetched_ai_ta_pending' || combinedServerState.analysisStatus === 'calculating_ai_ta') && !isDataFetching && " AI TA calculation in progress..."}
                     </CardDescription>
                       <DataExportControls
                         data={(parsedSnapshotData?.ticker === combinedServerState.tickerUsed && combinedServerState.stockJson) ? combinedServerState.stockJson : "{}"}
@@ -460,7 +521,42 @@ function StockAnalysisPageContent() {
                   </CardContent>
                 </Card>
 
-                {showAiTakeawaysCard && (
+                {showAiTaCard && (
+                  <Card className="shadow-md">
+                    <CardHeader>
+                      <div className="flex justify-between items-center">
+                        <CardTitle className="flex items-center gap-2 text-xl font-headline">
+                          <Wand2 className="h-6 w-6 text-purple-500" />
+                          AI Calculated Technical Indicators
+                          {combinedServerState.tickerUsed && ` for ${combinedServerState.tickerUsed}`}
+                        </CardTitle>
+                          {isCalculatingAiTa && <Loader2 className="h-5 w-5 text-purple-500 animate-spin" />}
+                      </div>
+                      <CardDescription>
+                        Pivot Points and Support/Resistance levels calculated by AI from previous day's data.
+                        {(combinedServerState.analysisStatus === 'ai_ta_calculated_key_takeaways_pending' || combinedServerState.analysisStatus === 'analyzing_data') && !isCalculatingAiTa && " AI key takeaways analysis in progress using this data..."}
+                      </CardDescription>
+                        <DataExportControls
+                          data={combinedServerState.calculatedAiTaObject || {}}
+                          baseFilename="ai-calculated-ta"
+                          titleForTextAndCsv={`AI Calculated TA for ${combinedServerState.tickerUsed || 'N/A'}`}
+                          isAvailable={isAiTaDataAvailableForExport}
+                          getTickerSymbolForFilename={getTickerSymbolForFilename}
+                          dataTypeHintForCsv="aiCalculatedTa" 
+                        />
+                    </CardHeader>
+                    <CardContent>
+                      <Textarea
+                        readOnly
+                        value={displayAiCalculatedTaJson}
+                        className="h-60 text-sm font-mono bg-muted/30 border-muted/50" 
+                        aria-label="AI Calculated Technical Indicators JSON"
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+
+                {showAiKeyTakeawaysCard && (
                   <Card className="shadow-md">
                     <CardHeader>
                         <div className="flex justify-between items-center">
@@ -471,12 +567,12 @@ function StockAnalysisPageContent() {
                             </CardTitle>
                             {isKeyTakeawaysLoading && <Loader2 className="h-5 w-5 text-accent animate-spin" />}
                         </div>
-                      <CardDescription>Analysis based on the stock snapshot and technical indicators, with sentiment coloring.</CardDescription>
+                      <CardDescription>Analysis based on the stock snapshot, technical indicators, and AI-calculated TAs, with sentiment coloring.</CardDescription>
                         <DataExportControls
                           data={currentAnalysisToDisplay}
-                          baseFilename="ai-analysis"
+                          baseFilename="ai-key-takeaways"
                           titleForTextAndCsv={`AI Key Takeaways for ${combinedServerState.tickerUsed || 'N/A'}`}
-                          isAvailable={hasValidAnalysisForUIDisplay && !isKeyTakeawaysLoading}
+                          isAvailable={hasValidKeyTakeawaysForUIDisplay && !isKeyTakeawaysLoading}
                           getTickerSymbolForFilename={getTickerSymbolForFilename}
                           dataTypeHintForCsv="analysis"
                         />
@@ -484,10 +580,14 @@ function StockAnalysisPageContent() {
                     <CardContent className="space-y-3 text-sm">
                       {isKeyTakeawaysLoading && (
                         <div className="flex items-center text-muted-foreground">
-                            <Clock className="h-4 w-4 mr-2 animate-pulse"/> AI key takeaways analysis is currently in progress for {combinedServerState.tickerUsed || "the requested stock"}...
+                            <Clock className="h-4 w-4 mr-2 animate-pulse"/> 
+                            {combinedServerState.analysisStatus === 'ai_ta_calculated_key_takeaways_pending' 
+                                ? `Preparing AI key takeaways analysis for ${combinedServerState.tickerUsed || "the stock"}...`
+                                : `AI key takeaways analysis is currently in progress for ${combinedServerState.tickerUsed || "the stock"}...`
+                            }
                         </div>
                       )}
-                      {hasValidAnalysisForUIDisplay && currentAnalysisToDisplay && (
+                      {hasValidKeyTakeawaysForUIDisplay && currentAnalysisToDisplay && (
                         <>
                           <div className="flex items-start">
                               <BarChart3 className="h-5 w-5 mr-2 mt-0.5 text-primary shrink-0"/>
@@ -511,11 +611,11 @@ function StockAnalysisPageContent() {
                           </div>
                         </>
                       )}
-                      {!isKeyTakeawaysLoading && !hasValidAnalysisForUIDisplay && combinedServerState.analysisStatus === 'error_analyzing_data' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed && (
+                      {!isKeyTakeawaysLoading && !hasValidKeyTakeawaysForUIDisplay && combinedServerState.analysisStatus === 'error_analyzing_data' && combinedServerState.tickerUsed === aiAnalysisResultState?.tickerAnalyzed && (
                         <p className="text-sm text-destructive">AI key takeaways analysis could not be completed due to an error for {combinedServerState.tickerUsed}. Please check the console for details.</p>
                       )}
-                      {!isKeyTakeawaysLoading && !hasValidAnalysisForUIDisplay &&
-                        (combinedServerState.analysisStatus === 'data_fetched_analysis_pending' || (combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.tickerUsed !== aiAnalysisResultState?.tickerAnalyzed)) && (
+                      {!isKeyTakeawaysLoading && !hasValidKeyTakeawaysForUIDisplay &&
+                        (combinedServerState.analysisStatus === 'ai_ta_calculated_key_takeaways_pending' || (combinedServerState.analysisStatus === 'analysis_complete' && combinedServerState.tickerUsed !== aiAnalysisResultState?.tickerAnalyzed)) && (
                         <p className="text-sm text-muted-foreground">AI key takeaways analysis is pending or some takeaways could not be generated yet for {combinedServerState.tickerUsed}.</p>
                       )}
                     </CardContent>
@@ -542,5 +642,3 @@ export default function StockAnalysisPage() {
     </StockAnalysisProvider>
   );
 }
-
-    

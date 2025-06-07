@@ -1,103 +1,73 @@
-[v1.2.11] [Feat & UI] Enhanced Chat, New Analysis Flow, UI/UX Improvements
+[v1.2.12] [Fix & Feat] Form Submission, Data Formatting, Chat AI Robustness & PRD Consolidation
 
 Details:
-Version 1.2.11 introduces several key enhancements focused on user experience, AI interaction, and providing more comprehensive analysis options. This includes relocating the financial disclaimer from AI prompts to the main UI, enabling full chat history export/copy, increasing the main content area size, displaying the app version, and adding a new "AI Full Stock Analysis" workflow that combines data fetching, key takeaway generation, and an automatic detailed chat analysis into a more streamlined process.
+Version 1.2.12 addresses a bug with form submission via the Enter key, standardizes numerical data formatting (two decimal places and dollar prefix for prices), and implements several improvements to enhance the robustness and completeness of AI-generated chat responses, particularly for the "Full Detailed Analysis" feature. This version also consolidates the PRD into README.md as the single source of truth.
 
 ---
 
-## Key Changes & Enhancements for v1.2.11:
+## Key Changes & Enhancements for v1.2.12:
 
-### 1. Disclaimer Management & AI Prompt Refinement:
-    *   **Disclaimer Relocated to UI:** The financial advice disclaimer ("⚠️ StockSage is for demonstration purposes only...") has been removed from AI system prompts (specifically in `chat-flow.ts`).
-    *   This disclaimer is now prominently displayed at the top of the main application page (`src/app/page.tsx`) and reiterated in the footer. This allows the AI to provide more direct financial insights while ensuring users are consistently reminded of the informational nature of the content.
-    *   The application version (1.2.11) is now displayed in the header of `src/app/page.tsx`.
+### 1. Bug Fixes:
+    *   **Enter Key Form Submission (`src/components/stock-analysis-page.tsx`):**
+        *   Resolved an issue where pressing Enter in the stock ticker input field would cause a full page refresh instead of initiating the analysis.
+        *   Implemented an `onSubmit` handler for the main analysis form. This handler now correctly captures form data, defaults `analysisType` to 'standard' for Enter key submissions, and invokes the `submitFetchStockDataForm` action from the context.
 
-### 2. Enhanced Chatbot Functionality:
-    *   **Full Chat History Export/Copy:** The "Copy" and "Export (.md)" buttons in the Chatbot UI (`src/components/chatbot.tsx`) now process the *entire* current chat conversation, rather than just the latest AI message. A helper function `formatChatHistoryForExport` was implemented for this. Button labels and titles have been updated to reflect this change.
-    *   **New "Full Detailed Analysis" Chat Prompt Button:** An example prompt button for "Full Detailed Analysis (Combined)" has been added (`src/ai/schemas/chat-prompts.ts`). This prompt instructs the AI to provide a single, comprehensive response covering stock trader takeaways, options trader considerations, and additional holistic points.
+### 2. Data Formatting Improvements:
+    *   **Two Decimal Point Precision for Numerical Data:**
+        *   **New Utility (`src/lib/number-utils.ts`):** Created `formatToTwoDecimalsOrNull` to consistently format numbers to a maximum of two decimal places, returning `null` for invalid inputs.
+        *   **AI Calculated TA (`src/ai/flows/calculate-ai-ta-flow.ts`):** Applied the new formatting utility to all Pivot Point and Support/Resistance level calculations before they are stored and displayed.
+        *   **AI Key Takeaways Prompt (`src/ai/flows/analyze-stock-data.ts`):** Updated the prompt to instruct the AI to use a maximum of two decimal places for numerical values in its textual takeaways.
+    *   **Dollar Sign ($) Prefix for Monetary Values:**
+        *   **AI Key Takeaways Prompt (`src/ai/flows/analyze-stock-data.ts`):** Enhanced the prompt to instruct the AI to always precede monetary values (e.g., stock prices, OHLC, VWAP, changes) with a dollar sign. Example output in the prompt was also updated.
+        *   **AI Chatbot Prompt (`src/ai/flows/chat-flow.ts`):** Added a similar instruction to the chatbot's system prompt and behavior guidelines to ensure monetary values in chat responses are prefixed with "$".
 
-### 3. New "AI Full Stock Analysis" Workflow:
-    *   **New Button in UI:** A new button, "AI Full Stock Analysis," has been added to `src/components/stock-analysis-page.tsx`.
-    *   **Sequential Operation:**
-        1.  Clicking this button triggers the standard stock data fetch (`fetchStockDataAction`) and the AI key takeaways generation (`performAiAnalysisAction`).
-        2.  `fetchStockDataAction` (`src/actions/analyze-stock-server-action.ts`) now includes an `initiateFullChatAnalysis` flag in its state, set based on which analysis button (`analysisType` in `FormData`) was clicked.
-        3.  If the initial data fetch and key takeaway generation are successful, `StockAnalysisProvider` (`src/contexts/stock-analysis-context.tsx`) detects the `initiateFullChatAnalysis` flag (managed as `triggerFullChatAfterAnalysis` in context state) and automatically triggers the "Full Detailed Analysis" chat prompt using the freshly analyzed data and key takeaways.
-    *   This provides a one-click option for users to get a deeper, multi-faceted AI analysis after the initial data presentation.
-    *   Button click handling in `stock-analysis-page.tsx` was refactored to use explicit `onClick` handlers for each analysis button, ensuring the `analysisType` ('standard' or 'fullDetail') is correctly set in `FormData`.
-    *   The `StockAnalysisProvider` now manages a `formRef` to allow child components (like the analysis buttons) to correctly construct `FormData` from the main form.
+### 3. AI Chatbot Robustness (Full Detailed Analysis):
+    *   **Model Parameters (`src/ai/flows/chat-flow.ts`):**
+        *   Adjusted `safetySettings` for the `financialChatPrompt` to `BLOCK_ONLY_HIGH` for all harm categories to reduce potential for overly cautious truncation.
+        *   Lowered `temperature` for the `financialChatPrompt` from `0.5` to `0.2` to encourage more focused and complete outputs.
+        *   (Note: `maxOutputTokens` was already at `4096`, confirmed sufficient).
+    *   **Prompt Refinement (`src/ai/schemas/chat-prompts.ts`):**
+        *   Modified the "Full Detailed Analysis (Combined)" example prompt to request "up to three" key takeaways for stock trader and options trader sections.
+        *   Standalone example prompts for stock/options takeaways were also updated to "up to three" for consistency.
+    *   **Completeness Instruction (`src/ai/flows/chat-flow.ts`):** Added an explicit guideline to the chat system prompt for the AI to ensure it addresses all parts of multi-part user questions.
 
-### 4. UI Sizing and Layout Adjustments:
-    *   **Increased Width:** The main content cards for both the Stock Analysis section (`src/components/stock-analysis-page.tsx`) and the AI Chat Assistant (`src/components/chatbot.tsx`) have been widened from `max-w-4xl` to `max-w-5xl` for better use of space.
-    *   **Increased Chat Height:** The scrollable message area within the AI Chat Assistant (`src/components/chatbot.tsx`) has been made taller, changing from `h-72` to `h-96`.
+### 4. Documentation & PRD Management:
+    *   **PRD Consolidation (`README.md`):**
+        *   The `README.md` file has been updated to serve as the sole, canonical Product Requirements Document (PRD) for StockSage v1.2.12.
+        *   A "PRD Management Note" has been added to the `README.md` outlining the policy that it is the single source of truth and must be self-contained.
+        *   Section 4 (User Stories) and Section 6.9 (Known Development Challenges) were expanded to ensure full detail and remove external dependencies (like `docs/pain_points.md`).
+        *   The internal changelog within `README.md` has been updated to reflect these changes and the PRD consolidation.
+    *   **Application Version Update (`src/app/page.tsx`):**
+        *   The displayed application version in the UI has been updated to "1.2.12".
+    *   **Obsolete Documentation (Effective Removal):**
+        *   Older PRD files in the `docs/` directory (`docs/PRD_Detailed_Design_StockSage.md`, `docs/PRD_StockSage_v1.0.0.md`, `docs/[1.2.9]_PRD_Destailed_Design_StockSage.md`) and `docs/pain_points.md` have had their content cleared as they are now superseded by `README.md`.
 
 ---
 
-## File Manifest for v1.2.11:
+## File Manifest for v1.2.12 (Changes from v1.2.11):
+
+### Added Files (2):
+*   `src/lib/number-utils.ts`
+*   `src/ai/flows/calculate-ai-ta-flow.ts`
 
 ### Modified Files (7):
-*   `src/actions/analyze-stock-server-action.ts`
+*   `src/components/stock-analysis-page.tsx`
+*   `src/ai/flows/analyze-stock-data.ts`
 *   `src/ai/flows/chat-flow.ts`
 *   `src/ai/schemas/chat-prompts.ts`
 *   `src/app/page.tsx`
-*   `src/components/chatbot.tsx`
-*   `src/components/stock-analysis-page.tsx`
-*   `src/contexts/stock-analysis-context.tsx`
-*   `git_commit_msg.md` (This file)
 *   `README.md`
+*   `git_commit_msg.md` (This file)
+
+### Effectively Removed/Emptied Files (Content superseded by README.md):
+*   `docs/PRD_Detailed_Design_StockSage.md`
+*   `docs/PRD_StockSage_v1.0.0.md`
 *   `docs/[1.2.9]_PRD_Destailed_Design_StockSage.md`
-
-
-### Added Files:
-*   None
-
-### Removed Files:
-*   None
+*   `docs/pain_points.md`
 
 ---
-**Previous Version (v1.2.9 - Commit #f61149e6) Message (for reference):**
-[v1.2.9] [Refactor & Feat] API-Only Data, No Chat Tools, Two-Stage Analysis & Stability
+**Previous Version (v1.2.11 - Commit #298d8962) Message (for reference):**
+[v1.2.11] [Feat & UI] Enhanced Chat, New Analysis Flow, UI/UX Improvements
 Details:
-This consolidated commit for v1.2.9 marks a significant evolution of StockSage, streamlining its core functionalities and enhancing stability. Key changes include: a refactor to a two-stage stock analysis process (data fetch then AI analysis), the complete removal of all mock data functionality, the consolidation of data sources to be strictly API-based (initially Polygon.io, with UI flexibility for future API providers), and the removal of all web search tools from the AI chatbot. These changes simplify the codebase, improve perceived performance, ensure AI insights are data-driven, and resolve critical bugs, including the "Unsupported GeminiPart type" error in the chatbot.
-The application now exclusively uses API data sources, starting with Polygon.io, for fetching market status, ticker snapshots (including previous day's data), and a predefined set of Technical Analysis (TA) indicators. This change ensures that all analysis and insights are grounded in verifiable, externally sourced data.
-The AI chatbot's capabilities have been refined to operate solely on its general knowledge and any context provided by the user (such as the current stock data displayed on the page). All tools that enabled external web searches or data fetching (e.g., `webSearchTool`, Google Search via `toolConfig`) have been removed from the `chat-flow.ts`. This simplifies the chatbot's operation and makes its responses more predictable based on the given inputs.
-A significant architectural change is the implementation of a two-stage stock analysis process managed by the `StockAnalysisProvider` and client-side `useEffect` hooks:
-1.  `fetchStockDataAction`: User initiates analysis, data is fetched from the selected API (e.g., Polygon) via server action.
-2.  `performAiAnalysisAction`: Upon successful data fetch from the API, the client automatically triggers a second server action to perform AI analysis (key takeaways) based *only* on the fetched JSON data.
-This two-stage process improves UI responsiveness by displaying fetched data quickly, followed by AI-generated insights. It also clearly separates data acquisition from AI interpretation.
-Client-side logging, theme management, and data export functionalities remain robust. The Debug Console continues to provide detailed tracing for easier troubleshooting. The `genkitPluginNextjs()` has been kept removed from `src/ai/genkit.ts` for stability, a lesson learned from previous attempts to resolve `async_hooks` issues with Turbopack. The `next.config.ts` is also kept minimal, without webpack fallbacks for `async_hooks`.
-These changes contribute to a more stable, reliable, and data-centric version of StockSage, laying a solid foundation for future enhancements.
-
-File Manifest for v1.2.9:
-Modified:
-- src/actions/analyze-stock-server-action.ts
-- src/actions/chat-server-action.ts
-- src/actions/perform-ai-analysis-action.ts
-- src/ai/flows/analyze-stock-data.ts
-- src/ai/flows/chat-flow.ts
-- src/ai/genkit.ts
-- src/ai/schemas/chat-prompts.ts
-- src/ai/schemas/chat-schemas.ts
-- src/ai/schemas/stock-analysis-schemas.ts
-- src/ai/schemas/stock-fetch-schemas.ts
-- src/components/chatbot.tsx
-- src/components/stock-analysis-page.tsx
-- src/contexts/stock-analysis-context.tsx
-- src/services/data-sources/adapters/polygon-adapter.ts
-- src/services/data-sources/index.ts
-- src/services/data-sources/types.ts
-- next.config.ts
-- README.md (updated PRD section)
-- docs/[1.2.9]_PRD_Destailed_Design_StockSage.md (new)
-- docs/pain_points.md (new)
-Removed:
-- src/ai/flows/fetch-stock-data.ts (AI-driven data fetching removed)
-- src/ai/schemas/web-search-schemas.ts
-- src/ai/tools/web-search-tool.ts
-- src/services/data-sources/adapters/ai-search-adapter.ts
-- src/services/data-sources/adapters/mock-adapter.ts
-Added:
-- src/ai/dev.ts (updated to reflect removed flows/tools)
-(Note: `package.json` and `components.json` might have minor updates due to shadcn/genkit versions but are structurally aligned with v1.2.7.)
-```
-
-    
+Version 1.2.11 introduces several key enhancements focused on user experience, AI interaction, and providing more comprehensive analysis options. This includes relocating the financial disclaimer from AI prompts to the main UI, enabling full chat history export/copy, increasing the main content area size, displaying the app version, and adding a new "AI Full Stock Analysis" workflow that combines data fetching, key takeaway generation, and an automatic detailed chat analysis into a more streamlined process.
+(Rest of v1.2.11 message omitted for brevity)
