@@ -1,46 +1,46 @@
 
 import StockAnalysisPage from '@/components/stock-analysis-page';
-import { TrendingUp, AlertTriangle } from 'lucide-react';
+import { ThemeProvider } from '@/components/theme-provider';
+import { ThemeToggleButton } from '@/components/theme-toggle-button';
+import { Toaster } from "@/components/ui/toaster"; // For toast notifications
+import { AlertTriangle, TrendingUp } from 'lucide-react'; // For disclaimer
 
 export default function Home() {
+  const appVersion = "1.2.14";
   const disclaimerText = "⚠️ StockSage is for demonstration purposes only. AI responses are for informational purposes and not financial advice. Always consult with a qualified financial advisor.";
-  const appVersion = "1.2.12"; // Updated version to 1.2.12
 
   return (
-    <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 flex flex-col">
-      <header className="mb-4 text-center">
-        <div className="inline-flex items-center gap-3 mb-1 justify-center">
-          <TrendingUp className="h-10 w-10 text-primary sm:h-12 sm:w-12" />
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-headline font-bold text-primary">
-            StockSage
-          </h1>
-        </div>
-        <p className="text-xs sm:text-sm text-muted-foreground/80 mb-2">
-          Version {appVersion}
-        </p>
-        <p className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto">
-          Enter a stock ticker and select an API data source to view market data and AI-powered insights.
-          You can also chat with our AI assistant below for more detailed analysis or general financial queries.
-        </p>
-      </header>
-      <div className="my-4 text-center">
-        <div 
-          className="text-xs sm:text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 p-3 rounded-md border border-amber-300 dark:border-amber-600 inline-flex items-center gap-2 max-w-3xl mx-auto"
-          role="alert"
-        >
-          <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
-          <span>{disclaimerText}</span>
-        </div>
-      </div>
-      <StockAnalysisPage />
-      <footer className="text-center py-8 mt-auto">
-        <p className="text-sm text-muted-foreground">
+    <ThemeProvider defaultTheme="dark" storageKey="stocksage-ui-theme">
+      <div className="min-h-screen bg-background text-foreground flex flex-col font-body selection:bg-primary/20 selection:text-primary">
+        <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="container flex h-14 max-w-screen-2xl items-center">
+            <div className="mr-4 flex items-center">
+              <TrendingUp className="h-7 w-7 mr-2 text-primary" />
+              <span className="font-bold text-xl font-headline">
+                StockSage <span className="text-xs text-muted-foreground align-super">v{appVersion}</span>
+              </span>
+            </div>
+            {/* Navbar items can go here if needed in the future */}
+          </div>
+        </header>
+        
+        <div className="p-2 text-xs text-center bg-sky-800 text-sky-100">
           {disclaimerText}
-        </p>
-        <p className="text-sm text-muted-foreground mt-1">
-          StockSage &copy; {new Date().getFullYear()}.
-        </p>
-      </footer>
-    </div>
+        </div>
+
+        <div className="flex-grow container mx-auto px-4 py-8 md:px-6 lg:px-8 max-w-screen-2xl"> {/* Increased max-width */}
+          <StockAnalysisPage />
+        </div>
+
+        <footer className="p-4 border-t border-border/40 bg-background text-center text-xs text-muted-foreground">
+          <p>{disclaimerText}</p>
+          <p>&copy; {new Date().getFullYear()} StockSage. All Rights Reserved (Demo Only).</p>
+          <p>Application Version: {appVersion}</p>
+        </footer>
+
+        <ThemeToggleButton />
+        <Toaster />
+      </div>
+    </ThemeProvider>
   );
 }

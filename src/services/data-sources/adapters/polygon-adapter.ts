@@ -4,8 +4,8 @@
  * Fetches:
  * 1. Current Market Status.
  * 2. Ticker Snapshot data (current day's OHLCV, VWAP, changes, and previous day's aggregates).
- * 3. Technical Indicators: RSI, EMA, SMA, MACD. For v1.2.9, all available indicators are fetched by default.
- * VWAP from snapshot is also mapped to technicalAnalysis.
+ * 3. Technical Indicators: RSI, EMA, SMA, MACD.
+ * 4. Options Chain Snapshot: For the current week's Friday expiration (inclusive), for up to 10 strikes above and 10 strikes below current price.
  */
 
 import {
@@ -16,26 +16,25 @@ import {
   type IIndicatorValue,
   type IMACDValue,
   type ITickerSnapshot,
+  // type IOptionsContracts, // No longer needed for discovery
+  // type IOptionsContract as PolygonOptionContractReference, // No longer needed for discovery
+  type IOptionsSnapshotChain, // Result from options.snapshotOptionChain
+  type IOptionsSnapshotContract as PolygonOptionContractSnapshot, // Individual item in IOptionsSnapshotChain.results
 } from '@polygon.io/client-js';
-import type { IDataSourceAdapter, AdapterOutput, StockDataJson } from '../types'; // GranularTaConfigType removed
-import type { MarketStatusData, StockSnapshotData, TechnicalAnalysisData, IndicatorValue as MappedIndicatorValue } from '../types';
-import { DISABLED_BY_CONFIG_TEXT } from '@/ai/schemas/stock-fetch-schemas'; // Still used if an indicator is truly not configurable/available
-import { EMPTY_STOCK_DATA_JSON } from '../types'; // DEFAULT_GRANULAR_TA_CONFIG removed
-import { formatTimestampToPacificTime } from '@/lib/date-utils';
+import type {
+  IDataSourceAdapter,
+  AdapterOutput,
+  StockDataJson,
+  OptionsChainData,
+  OptionContractDetails,
+  StrikeWithOptions
+} from '../types';
+import type { MarketStatusData, StockSnapshotData, TechnicalAnalysisData } from '../types';
+import { EMPTY_STOCK_DATA_JSON } from '../types';
+import { formatTimestampToPacificTime, calculateNextFridayExpiration } from '@/lib/date-utils';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const DEFAULT_STOCK_SNAPSHOT_NULL_VALUES_ADAPTER: StockSnapshotData = {
-    ticker: "",
-    todaysChangePerc: null,
-    todaysChange: null,
-    updated: formatTimestampToPacificTime(new Date(0).toISOString()),
-    day: { o: null, h: null, l: null, c: null, v: null, vw: null },
-    min: { o: null, h: null, l: null, c: null, v: null, vw: null },
-    prevDay: { o: null, h: null, l: null, c: null, v: null, vw: null }
-};
-
-// For v1.2.9, this structure defines what TAs are attempted. All values will be numbers or null.
 const createInitialTaData = (): TechnicalAnalysisData => ({
   rsi: { '7': null, '10': null, '14': null },
   ema: { '5': null, '10': null, '20': null, '50': null, '200': null },
@@ -78,10 +77,6 @@ async function fetchMarketStatusFromPolygonAPI(rest: ReturnType<typeof restClien
         nasdaq: marketStatusResult.exchanges?.nasdaq,
         otc: marketStatusResult.exchanges?.otc,
       },
-      currencies: marketStatusResult.currencies ? {
-        fx: marketStatusResult.currencies.fx,
-        crypto: marketStatusResult.currencies.crypto,
-      } : undefined,
     };
   } catch (error: any) {
     let detail = 'Unknown error';
@@ -129,7 +124,7 @@ async function fetchIndicatorValueFromPolygonAPI(
     return null;
   } catch (error: any) {
     console.error(`[ADAPTER:Polygon:TA:Error] Error fetching ${indicatorFnName.toUpperCase()} for ${ticker} with query ${JSON.stringify(query)}:`, error.message);
-    return null; // Return null on error, as per v1.2.9 expectation for TA values
+    return null;
   }
 }
 
@@ -148,69 +143,245 @@ export class PolygonAdapter implements IDataSourceAdapter {
 
   private async _fetchSnapshotData(ticker: string): Promise<StockSnapshotData | null> {
     if (!this.rest) return null;
-    console.log(`[ADAPTER:Polygon:Snapshot:Attempt] Fetching snapshot for ${ticker}.`);
+    const upperTicker = ticker.toUpperCase();
+    console.log(`[ADAPTER:Polygon:Snapshot:Attempt] Fetching stock snapshot for ${upperTicker}.`);
     try {
-        const snapshotResult: ITickerSnapshot = await this.rest.stocks.snapshotTicker(ticker);
+        const snapshotResult: ITickerSnapshot = await this.rest.stocks.snapshotTicker(upperTicker);
         if (snapshotResult?.status === "OK" && snapshotResult.ticker) {
             const t = snapshotResult.ticker;
             const updatedTimestampPT = t.updated ? formatTimestampToPacificTime(t.updated) : formatTimestampToPacificTime(new Date(0).toISOString());
 
             return {
-                ticker: t.ticker,
+                ticker: t.ticker.toUpperCase(), // Ensure ticker is uppercase
                 todaysChangePerc: formatNumber(t.todaysChangePerc),
                 todaysChange: formatNumber(t.todaysChange),
                 updated: updatedTimestampPT,
                 day: t.day ? {
-                    o: formatNumber(t.day.o),
-                    h: formatNumber(t.day.h),
-                    l: formatNumber(t.day.l),
-                    c: formatNumber(t.day.c),
-                    v: t.day.v ? Number(t.day.v) : null,
-                    vw: formatNumber(t.day.vw)
+                    o: formatNumber(t.day.o), h: formatNumber(t.day.h), l: formatNumber(t.day.l), c: formatNumber(t.day.c),
+                    v: t.day.v ? Number(t.day.v) : null, vw: formatNumber(t.day.vw)
                 } : { o: null, h: null, l: null, c: null, v: null, vw: null },
                 min: t.min ? {
-                    o: formatNumber(t.min.o),
-                    h: formatNumber(t.min.h),
-                    l: formatNumber(t.min.l),
-                    c: formatNumber(t.min.c),
-                    v: t.min.v ? Number(t.min.v) : null,
-                    vw: formatNumber(t.min.vw)
+                    o: formatNumber(t.min.o), h: formatNumber(t.min.h), l: formatNumber(t.min.l), c: formatNumber(t.min.c),
+                    v: t.min.v ? Number(t.min.v) : null, vw: formatNumber(t.min.vw)
                 } : { o: null, h: null, l: null, c: null, v: null, vw: null },
                 prevDay: t.prevDay ? {
-                    o: formatNumber(t.prevDay.o),
-                    h: formatNumber(t.prevDay.h),
-                    l: formatNumber(t.prevDay.l),
-                    c: formatNumber(t.prevDay.c),
-                    v: t.prevDay.v ? Number(t.prevDay.v) : null,
-                    vw: formatNumber(t.prevDay.vw)
+                    o: formatNumber(t.prevDay.o), h: formatNumber(t.prevDay.h), l: formatNumber(t.prevDay.l), c: formatNumber(t.prevDay.c),
+                    v: t.prevDay.v ? Number(t.prevDay.v) : null, vw: formatNumber(t.prevDay.vw)
                 } : { o: null, h: null, l: null, c: null, v: null, vw: null }
             };
         }
-        console.warn(`[ADAPTER:Polygon:Snapshot:Warn] No snapshot data found for ${ticker}. Response:`, snapshotResult);
+        console.warn(`[ADAPTER:Polygon:Snapshot:Warn] No stock snapshot data found for ${upperTicker}. Response:`, snapshotResult);
         return null;
     } catch (error: any) {
-        console.error(`[ADAPTER:Polygon:Snapshot:Error] Error fetching snapshot for ${ticker}:`, error.message);
+        console.error(`[ADAPTER:Polygon:Snapshot:Error] Error fetching stock snapshot for ${upperTicker}:`, error.message);
         return null;
     }
-}
+  }
+
+  private mapPolygonOptionSnapshotToContractDetails(optionSnapshot?: PolygonOptionContractSnapshot): OptionContractDetails | undefined {
+    if (!optionSnapshot || !optionSnapshot.details) {
+        return undefined;
+    }
+    const details = optionSnapshot.details;
+    return {
+      // ticker: details.ticker!, // REMOVED
+      contract_type: details.contract_type! as 'call' | 'put',
+      // exercise_style: details.exercise_style! as 'american' | 'european' | 'bermudan', // REMOVED
+      // expiration_date: details.expiration_date!, // REMOVED
+      strike_price: details.strike_price!, // KEPT
+      day: optionSnapshot.day ? {
+        close: formatNumber(optionSnapshot.day.close),
+        high: formatNumber(optionSnapshot.day.high),
+        low: formatNumber(optionSnapshot.day.low),
+        open: formatNumber(optionSnapshot.day.open),
+        volume: optionSnapshot.day.volume ? Number(optionSnapshot.day.volume) : undefined,
+        vwap: formatNumber(optionSnapshot.day.vwap)
+      } : {},
+      details: { 
+        // break_even_price: formatNumber(optionSnapshot.break_even_price), // REMOVED (was top-level anyway)
+        implied_volatility: formatNumber(optionSnapshot.implied_volatility, 4), 
+        open_interest: optionSnapshot.open_interest ? Number(optionSnapshot.open_interest) : undefined,
+        delta: formatNumber(optionSnapshot.greeks?.delta, 4),
+        gamma: formatNumber(optionSnapshot.greeks?.gamma, 4),
+        theta: formatNumber(optionSnapshot.greeks?.theta, 4),
+        vega: formatNumber(optionSnapshot.greeks?.vega, 4),
+      },
+      // last_quote: optionSnapshot.last_quote ? { // REMOVED
+      //   ask: formatNumber(optionSnapshot.last_quote.ask),
+      //   ask_size: optionSnapshot.last_quote.ask_size ? Number(optionSnapshot.last_quote.ask_size) : undefined,
+      //   bid: formatNumber(optionSnapshot.last_quote.bid),
+      //   bid_size: optionSnapshot.last_quote.bid_size ? Number(optionSnapshot.last_quote.bid_size) : undefined,
+      //   midpoint: formatNumber(optionSnapshot.last_quote.midpoint),
+      //   last_updated: optionSnapshot.last_quote.last_updated ? formatTimestampToPacificTime(optionSnapshot.last_quote.last_updated) : undefined,
+      // } : {},
+      // underlying_asset: optionSnapshot.underlying_asset ? { // REMOVED
+      //   price: formatNumber(optionSnapshot.underlying_asset.price), 
+      //   ticker: optionSnapshot.underlying_asset.ticker,
+      // } : {}
+    };
+  }
+
+  private async _fetchAndProcessOptionsChain(
+    underlyingTicker: string,
+    currentStockPrice: number
+  ): Promise<OptionsChainData | null> {
+    if (!this.rest) return null;
+    const upperTicker = underlyingTicker.toUpperCase();
+    const targetExpirationDate = calculateNextFridayExpiration();
+    const apiLimitPerType = 50; // Fetch up to 50 calls and 50 puts to have a good selection pool
+    const strikePriceWindow = 15; // Fetch strikes within +/- $15 (or other value) of current price
+
+    const lowerBoundStrike = Math.max(1, Math.floor(currentStockPrice - strikePriceWindow));
+    const upperBoundStrike = Math.ceil(currentStockPrice + strikePriceWindow);
+
+    console.log(`[ADAPTER:Polygon:Options:Attempt] Fetching options chain for ${upperTicker}, target expiration: ${targetExpirationDate}, current stock price: ${currentStockPrice}, strike window: [${lowerBoundStrike}-${upperBoundStrike}]`);
+
+    let fetchedCallContracts: PolygonOptionContractSnapshot[] = [];
+    let fetchedPutContracts: PolygonOptionContractSnapshot[] = [];
+
+    try {
+      console.log(`[ADAPTER:Polygon:Options:FetchCalls] Fetching CALLS for ${upperTicker}, Exp: ${targetExpirationDate}, StrikeRange: [${lowerBoundStrike}-${upperBoundStrike}]`);
+      const callsResponse: IOptionsSnapshotChain = await this.rest.options.snapshotOptionChain(upperTicker, {
+        "strike_price.gte": lowerBoundStrike.toString(),
+        "strike_price.lte": upperBoundStrike.toString(),
+        expiration_date: targetExpirationDate,
+        contract_type: "call",
+        limit: apiLimitPerType,
+        sort: "strike_price",
+        order: "desc" // Request descending order from API
+      });
+      fetchedCallContracts = callsResponse.results || [];
+      console.log(`[ADAPTER:Polygon:Options:FetchCalls] Received ${fetchedCallContracts.length} CALL contracts for ${upperTicker}.`);
+    } catch (e: any) {
+      console.error(`[ADAPTER:Polygon:Options:FetchCalls:Error] Error fetching CALLS for ${upperTicker}: ${e.message}`);
+    }
+
+    await delay(50); // Brief pause before next API call
+
+    try {
+      console.log(`[ADAPTER:Polygon:Options:FetchPuts] Fetching PUTS for ${upperTicker}, Exp: ${targetExpirationDate}, StrikeRange: [${lowerBoundStrike}-${upperBoundStrike}]`);
+      const putsResponse: IOptionsSnapshotChain = await this.rest.options.snapshotOptionChain(upperTicker, {
+        "strike_price.gte": lowerBoundStrike.toString(),
+        "strike_price.lte": upperBoundStrike.toString(),
+        expiration_date: targetExpirationDate,
+        contract_type: "put",
+        limit: apiLimitPerType,
+        sort: "strike_price",
+        order: "desc" // Request descending order from API
+      });
+      fetchedPutContracts = putsResponse.results || [];
+      console.log(`[ADAPTER:Polygon:Options:FetchPuts] Received ${fetchedPutContracts.length} PUT contracts for ${upperTicker}.`);
+    } catch (e: any) {
+      console.error(`[ADAPTER:Polygon:Options:FetchPuts:Error] Error fetching PUTS for ${upperTicker}: ${e.message}`);
+    }
+    
+    const allFetchedStrikesMap = new Map<number, { call?: PolygonOptionContractSnapshot, put?: PolygonOptionContractSnapshot }>();
+    
+    fetchedCallContracts.forEach(c => {
+        if (c.details?.strike_price) {
+            if (!allFetchedStrikesMap.has(c.details.strike_price)) allFetchedStrikesMap.set(c.details.strike_price, {});
+            allFetchedStrikesMap.get(c.details.strike_price)!.call = c;
+        }
+    });
+    fetchedPutContracts.forEach(c => {
+        if (c.details?.strike_price) {
+            if (!allFetchedStrikesMap.has(c.details.strike_price)) allFetchedStrikesMap.set(c.details.strike_price, {});
+            allFetchedStrikesMap.get(c.details.strike_price)!.put = c;
+        }
+    });
+
+    const uniqueStrikesFromFetched = Array.from(allFetchedStrikesMap.keys()).sort((a, b) => a - b); // Sort ascending for easier selection logic
+    console.log(`[ADAPTER:Polygon:Options:Filter] ${uniqueStrikesFromFetched.length} unique strikes derived from GTE/LTE fetch: ${uniqueStrikesFromFetched.slice(0, 25).join(', ')}...`);
+
+    if (uniqueStrikesFromFetched.length === 0) {
+        const msg = `No option contracts found for ${upperTicker} (Exp: ${targetExpirationDate}) within strike window ${lowerBoundStrike}-${upperBoundStrike}.`;
+        console.warn(`[ADAPTER:Polygon:Options:NoData] ${msg}`);
+        return {
+            underlying_ticker: upperTicker,
+            target_expiration_date: targetExpirationDate,
+            selected_strikes_data: [],
+            fetched_at: formatTimestampToPacificTime(Date.now()),
+            message: msg,
+        };
+    }
+    
+    let strikesToProcess: number[] = [];
+    const strikesBelowCurrent = uniqueStrikesFromFetched.filter(s => s < currentStockPrice).sort((a,b) => b - a); // Descending, closest first
+    const strikesAboveCurrent = uniqueStrikesFromFetched.filter(s => s > currentStockPrice).sort((a,b) => a - b); // Ascending, closest first
+    const strikeAtCurrentPrice = uniqueStrikesFromFetched.find(s => s === currentStockPrice);
+
+    if (strikeAtCurrentPrice !== undefined) {
+        strikesToProcess.push(strikeAtCurrentPrice);
+    }
+    strikesToProcess.push(...strikesBelowCurrent.slice(0, 10));
+    strikesToProcess.push(...strikesAboveCurrent.slice(0, 10));
+    
+    const finalSelectedUniqueStrikes = Array.from(new Set(strikesToProcess)).sort((a,b) => a - b); // Sort ascending for processing
+    
+    console.log(`[ADAPTER:Polygon:Options:Filter] Selected ${finalSelectedUniqueStrikes.length} final unique strikes for detailed assembly (sorted asc for processing): ${finalSelectedUniqueStrikes.join(', ')}`);
+    
+    if (finalSelectedUniqueStrikes.length === 0) {
+       const msg = `Could not select any relevant strikes near current price ${currentStockPrice} from the fetched contracts for ${upperTicker} (Exp: ${targetExpirationDate}).`;
+       console.warn(`[ADAPTER:Polygon:Options:Filter] ${msg}`);
+        return {
+            underlying_ticker: upperTicker,
+            target_expiration_date: targetExpirationDate,
+            selected_strikes_data: [],
+            fetched_at: formatTimestampToPacificTime(Date.now()),
+            message: msg
+        };
+    }
+    
+    const resultStrikesData: StrikeWithOptions[] = [];
+    for (const strikeVal of finalSelectedUniqueStrikes) { // Iterate through strikes sorted ascending
+        const strikeEntry = allFetchedStrikesMap.get(strikeVal);
+        if (strikeEntry) {
+            const strikeDataToAdd: StrikeWithOptions = { strike_price: strikeVal };
+            if (strikeEntry.call) {
+                strikeDataToAdd.call = this.mapPolygonOptionSnapshotToContractDetails(strikeEntry.call);
+            }
+            if (strikeEntry.put) {
+                strikeDataToAdd.put = this.mapPolygonOptionSnapshotToContractDetails(strikeEntry.put);
+            }
+            if (strikeDataToAdd.call || strikeDataToAdd.put) {
+                resultStrikesData.push(strikeDataToAdd);
+            }
+        }
+    }
+    
+    // Ensure the final selected_strikes_data is sorted in descending order by strike_price
+    resultStrikesData.sort((a, b) => b.strike_price - a.strike_price);
+
+    console.log(`[ADAPTER:Polygon:Options:Result] Assembled data for ${resultStrikesData.length} strikes for ${upperTicker} (Exp: ${targetExpirationDate}), sorted descending.`);
+    return {
+      underlying_ticker: upperTicker,
+      target_expiration_date: targetExpirationDate,
+      selected_strikes_data: resultStrikesData,
+      fetched_at: formatTimestampToPacificTime(Date.now()),
+      message: resultStrikesData.length > 0 ? undefined : `No snapshot data assembled for selected strikes (Exp: ${targetExpirationDate}).`
+    };
+  }
+
 
   async getFullStockData(
     ticker: string
-    // selectedIndicatorsConfig and apiCallDelay removed for v1.2.9
   ): Promise<AdapterOutput> {
-    const apiCallDelay = 100; // Default API call delay for v1.2.9
-    console.log(`[ADAPTER:Polygon] getFullStockData for ticker: ${ticker}, Delay: ${apiCallDelay}ms (fixed for v1.2.9)`);
+    const apiCallDelay = 50; 
+    const upperTicker = ticker.toUpperCase();
+    console.log(`[ADAPTER:Polygon] getFullStockData for ticker: ${upperTicker}`);
+
     if (!this.rest) {
       const errorMsg = "Polygon API key is not configured. Adapter cannot function.";
       console.error(`[ADAPTER:Polygon] ${errorMsg}`);
-      return { stockDataJson: { ...EMPTY_STOCK_DATA_JSON }, error: errorMsg };
+      const snapshotWithError = { ...EMPTY_STOCK_DATA_JSON.stockSnapshot, ticker: upperTicker } as StockSnapshotData; 
+      return { stockDataJson: { ...EMPTY_STOCK_DATA_JSON, stockSnapshot: snapshotWithError }, error: errorMsg };
     }
 
-    const upperTicker = ticker.toUpperCase();
     const finalOutputData: StockDataJson = {
       marketStatus: undefined,
       stockSnapshot: undefined,
-      technicalAnalysis: createInitialTaData(), // All TAs initialized to null
+      technicalAnalysis: createInitialTaData(),
+      optionsChain: undefined,
     };
 
     try {
@@ -218,10 +389,20 @@ export class PolygonAdapter implements IDataSourceAdapter {
       await delay(apiCallDelay);
     } catch (error: any) {
       console.error(`[ADAPTER:Polygon] CRITICAL: Failed to fetch market status. Error: ${error.message}`);
-      return { stockDataJson: { ...finalOutputData, marketStatus: undefined }, error: `Failed to fetch critical market status for ${upperTicker}: ${error.message}` };
+      const snapshotWithError = { ...EMPTY_STOCK_DATA_JSON.stockSnapshot, ticker: upperTicker } as StockSnapshotData; 
+      return { stockDataJson: { ...finalOutputData, marketStatus: undefined, stockSnapshot: snapshotWithError }, error: `Failed to fetch critical market status for ${upperTicker}: ${error.message}` };
     }
 
     finalOutputData.stockSnapshot = await this._fetchSnapshotData(upperTicker);
+    if (!finalOutputData.stockSnapshot) {
+        const noSnapshotError = `Failed to fetch stock snapshot for ${upperTicker}. Cannot proceed with options or full TA.`;
+        console.error(`[ADAPTER:Polygon] ${noSnapshotError}`);
+        const snapshotWithError = { ...EMPTY_STOCK_DATA_JSON.stockSnapshot, ticker: upperTicker } as StockSnapshotData; 
+        return { stockDataJson: {...finalOutputData, stockSnapshot: snapshotWithError }, error: noSnapshotError };
+    }
+    finalOutputData.stockSnapshot.ticker = finalOutputData.stockSnapshot.ticker.toUpperCase();
+
+
     if (finalOutputData.stockSnapshot?.day?.vw !== undefined && finalOutputData.technicalAnalysis?.vwap) {
         finalOutputData.technicalAnalysis.vwap.day = finalOutputData.stockSnapshot.day.vw;
     }
@@ -230,9 +411,24 @@ export class PolygonAdapter implements IDataSourceAdapter {
     }
     await delay(apiCallDelay);
 
+    const currentPriceForOptions = finalOutputData.stockSnapshot?.day?.c;
+    if (currentPriceForOptions !== null && currentPriceForOptions !== undefined) {
+      finalOutputData.optionsChain = await this._fetchAndProcessOptionsChain(upperTicker, currentPriceForOptions);
+    } else {
+      const msg = `Skipped options chain fetch for ${upperTicker} as current stock price (stockSnapshot.day.c) is unavailable.`;
+      console.warn(`[ADAPTER:Polygon] ${msg}`);
+      finalOutputData.optionsChain = {
+        underlying_ticker: upperTicker,
+        target_expiration_date: calculateNextFridayExpiration(),
+        selected_strikes_data: [],
+        fetched_at: formatTimestampToPacificTime(Date.now()),
+        message: msg
+      };
+    }
+
+
     const baseTaParams = { timespan: 'day' as const, adjusted: "true", series_type: 'close' as const, order: 'desc' as const, limit: 500 };
 
-    // RSI - Fetch all defined windows
     for (const w of AVAILABLE_TA_WINDOWS_CONFIG.rsiWindows) {
       const val = await fetchIndicatorValueFromPolygonAPI('rsi', this.rest.stocks.rsi.bind(this.rest.stocks), upperTicker, { ...baseTaParams, window: w });
       if (finalOutputData.technicalAnalysis?.rsi) {
@@ -240,8 +436,6 @@ export class PolygonAdapter implements IDataSourceAdapter {
       }
       await delay(apiCallDelay);
     }
-
-    // EMA - Fetch all defined windows
     for (const w of AVAILABLE_TA_WINDOWS_CONFIG.emaWindows) {
       const val = await fetchIndicatorValueFromPolygonAPI('ema', this.rest.stocks.ema.bind(this.rest.stocks), upperTicker, { ...baseTaParams, window: w });
        if (finalOutputData.technicalAnalysis?.ema) {
@@ -249,8 +443,6 @@ export class PolygonAdapter implements IDataSourceAdapter {
       }
       await delay(apiCallDelay);
     }
-
-    // SMA - Fetch all defined windows
     for (const w of AVAILABLE_TA_WINDOWS_CONFIG.smaWindows) {
       const val = await fetchIndicatorValueFromPolygonAPI('sma', this.rest.stocks.sma.bind(this.rest.stocks), upperTicker, { ...baseTaParams, window: w });
       if (finalOutputData.technicalAnalysis?.sma) {
@@ -259,7 +451,6 @@ export class PolygonAdapter implements IDataSourceAdapter {
       await delay(apiCallDelay);
     }
 
-    // MACD - Always fetch
     const macdVal = await fetchIndicatorValueFromPolygonAPI('macd', this.rest.stocks.macd.bind(this.rest.stocks), upperTicker, { ...baseTaParams, short_window: "12", long_window: "26", signal_window: "9" });
     if (macdVal && typeof macdVal === 'object' && macdVal !== null && finalOutputData.technicalAnalysis?.macd) {
       const macdData = macdVal as { value: number | null; signal: number | null; histogram: number | null };
@@ -272,7 +463,7 @@ export class PolygonAdapter implements IDataSourceAdapter {
       finalOutputData.technicalAnalysis.macd.histogram = null;
     }
 
-    console.log(`[ADAPTER:Polygon] Finished fetching. Final data for ${upperTicker} (first 300 chars): ${JSON.stringify(finalOutputData).substring(0,300)}...`);
+    console.log(`[ADAPTER:Polygon] Finished fetching all data for ${upperTicker}. Options chain (message/count): ${finalOutputData.optionsChain?.message || (finalOutputData.optionsChain?.selected_strikes_data?.length ? finalOutputData.optionsChain?.selected_strikes_data?.length + ' strike sets processed' : 'No options data/strikes processed')}`);
     return { stockDataJson: finalOutputData };
   }
 }

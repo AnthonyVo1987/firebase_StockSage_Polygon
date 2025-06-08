@@ -1,13 +1,18 @@
 
-import type {Metadata} from 'next';
+import type { Metadata } from 'next';
+import { Inter } from 'next/font/google'; // Import Inter font
 import './globals.css';
-import { Toaster } from "@/components/ui/toaster";
-import { ThemeProvider } from '@/components/theme-provider';
-import { ThemeToggleButton } from '@/components/theme-toggle-button';
+
+// Configure Inter font
+const inter = Inter({ 
+  subsets: ['latin'],
+  display: 'swap', // Use swap for better perceived performance
+  variable: '--font-inter', // Optional: if you want to use it as a CSS variable
+});
 
 export const metadata: Metadata = {
-  title: 'StockSage - AI Powered Stock Analysis',
-  description: 'AI Powered Stock and Options Analysis',
+  title: 'StockSage v1.2.14 - AI Stock Analysis',
+  description: 'AI Powered Stock and Options Analysis v1.2.14',
 };
 
 export default function RootLayout({
@@ -16,22 +21,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-      </head>
-      <body className="font-body antialiased min-h-screen flex flex-col bg-background text-foreground">
-        <ThemeProvider defaultTheme="dark" storageKey="stocksage-theme">
-          <div className="relative flex flex-col flex-grow">
-            <ThemeToggleButton />
-            <div className="flex-grow flex flex-col">
-              {children}
-            </div>
-          </div>
-          <Toaster />
-        </ThemeProvider>
+    <html lang="en" className={`${inter.variable} font-sans`} suppressHydrationWarning>
+      {/* 
+        ThemeProvider, Toaster, ThemeToggleButton are now directly in page.tsx 
+        to simplify initial layout and ensure they are within the client boundary 
+        if they cause issues during SSR with the broader layout.
+        The main body tag here will inherit the font from the html tag.
+      */}
+      <body>
+        {children}
       </body>
     </html>
   );

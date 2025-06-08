@@ -2,10 +2,11 @@
 /**
  * @fileOverview Utility functions for date and time formatting.
  */
+import { getDay, addDays, format, nextFriday as dateFnsNextFriday, isFriday as dateFnsIsFriday } from 'date-fns';
 
 /**
  * Formats a timestamp to a Pacific Time string (hh:mm:ss AM/PM).
- * @param timestamp - The timestamp to format. Can be an ISO 8601 string, 
+ * @param timestamp - The timestamp to format. Can be an ISO 8601 string,
  *                    a Unix timestamp in milliseconds, or a nanosecond timestamp.
  * @returns A string representing the time in Pacific Time, e.g., "02:30:45 PM",
  *          or "Invalid Date" if the input is not a valid timestamp.
@@ -51,4 +52,25 @@ export function formatTimestampToPacificTime(timestamp: string | number): string
         hour12: true,
       }) + " (System Time, PT conversion failed)";
   }
+}
+
+
+/**
+ * Calculates the target Friday expiration date string (YYYY-MM-DD).
+ * - If today is Mon-Thu: this coming Friday.
+ * - If today is Fri: today.
+ * - If today is Sat/Sun: next week's Friday.
+ * Uses the server's current date.
+ * @returns The target Friday expiration date string in 'yyyy-MM-dd' format.
+ */
+export function calculateNextFridayExpiration(): string {
+  const today = new Date(); // Uses server's current date
+  let targetFriday: Date;
+
+  if (dateFnsIsFriday(today)) {
+    targetFriday = today;
+  } else {
+    targetFriday = dateFnsNextFriday(today);
+  }
+  return format(targetFriday, 'yyyy-MM-dd');
 }

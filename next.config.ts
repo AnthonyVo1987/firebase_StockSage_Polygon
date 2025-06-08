@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
     ],
   },
   // No webpack function for async_hooks for v1.2.9
+  allowedDevOrigins: ['3000-firebase-studio-1748651395252.cluster-t23zgfo255e32uuvburngnfnn4.cloudworkstations.dev'],
 };
 
 export default nextConfig;

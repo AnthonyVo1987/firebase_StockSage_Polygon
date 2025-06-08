@@ -10,13 +10,29 @@ import {
   performAiAnalysisAction,
   type AiAnalysisResultState,
 } from '@/actions/perform-ai-analysis-action';
+import {
+  calculateAiTaAction, // New action
+  type AiCalculatedTaState, // New state type
+} from '@/actions/calculate-ai-ta-action';
 import type { ChatState as ServerChatState, ChatMessage as ServerChatMessage } from '@/ai/schemas/chat-schemas';
 import type { AnalyzeStockDataOutput } from '@/ai/schemas/stock-analysis-schemas';
+import type { AiCalculatedTaOutput } from '@/ai/schemas/ai-calculated-ta-schemas'; // New
 import { examplePrompts } from '@/ai/schemas/chat-prompts';
 import type { UsageReport } from '@/ai/schemas/common-schemas';
 import type { DataSourceId } from '@/services/data-sources/types';
 
-export type AnalysisStatus = StockDataFetchState['analysisStatus'];
+// Updated AnalysisStatus to include new steps
+export type AnalysisStatus = 
+  | 'idle' 
+  | 'data_fetching' 
+  | 'data_fetched_ai_ta_pending' // New: After Polygon data, before AI TA calc
+  | 'calculating_ai_ta'          // New: AI TA calculation in progress
+  | 'ai_ta_calculated_key_takeaways_pending' // New: After AI TA, before Key Takeaways
+  | 'analyzing_data'             // Now specifically for Key Takeaways analysis
+  | 'analysis_complete' 
+  | 'error_fetching_data' 
+  | 'error_calculating_ai_ta'    // New
+  | 'error_analyzing_data';      // Now specifically for Key Takeaways analysis error
 
 export const initialStockDataFetchState: StockDataFetchState = {
   stockJson: undefined,
@@ -38,14 +54,28 @@ export const initialAiAnalysisResultState: AiAnalysisResultState = {
   tickerAnalyzed: undefined,
 };
 
+// New initial state for AI Calculated TA
+export const initialAiCalculatedTaState: AiCalculatedTaState = {
+  calculatedTaJson: undefined,
+  calculatedTaObject: undefined,
+  calculatedTaUsageReport: undefined,
+  error: undefined,
+  fieldErrors: undefined,
+  timestamp: undefined,
+  tickerAnalyzed: undefined,
+};
+
 export interface CombinedStockAnalysisState {
   stockJson?: string;
-  analysis?: AnalyzeStockDataOutput;
+  analysis?: AnalyzeStockDataOutput; // Key Takeaways
+  calculatedAiTaJson?: string;      // New: AI Calculated TA JSON
+  calculatedAiTaObject?: AiCalculatedTaOutput; // New: AI Calculated TA Object
   error?: string;
-  fieldErrors?: StockDataFetchState['fieldErrors'];
+  fieldErrors?: StockDataFetchState['fieldErrors'] | AiCalculatedTaState['fieldErrors']; // Can be from either action
   timestamp?: number;
   fetchUsageReport?: UsageReport;
-  analysisUsageReport?: UsageReport;
+  aiCalculatedTaUsageReport?: UsageReport; // New
+  analysisUsageReport?: UsageReport; // For Key Takeaways
   analysisStatus: AnalysisStatus;
   tickerUsed?: string;
   dataSourceUsed?: DataSourceId;
@@ -61,10 +91,13 @@ export const initialCombinedStockAnalysisState: CombinedStockAnalysisState = {
     momentum: { text: "AI analysis of momentum pending.", sentiment: "neutral" },
     patterns: { text: "AI analysis of patterns pending.", sentiment: "neutral" }
   },
+  calculatedAiTaJson: undefined,
+  calculatedAiTaObject: undefined,
   error: undefined,
   fieldErrors: undefined,
   timestamp: undefined,
   fetchUsageReport: undefined,
+  aiCalculatedTaUsageReport: undefined,
   analysisUsageReport: undefined,
   analysisStatus: 'idle',
   tickerUsed: undefined,
@@ -100,26 +133,21 @@ const initialChatState: ContextChatState = {
     timestamp: Date.now(),
 };
 
-// Helper to construct analysis summary
-const constructAnalysisSummaryForChat = (currentAnalysis?: AnalyzeStockDataOutput): string | undefined => {
-  if (!currentAnalysis) return undefined;
-  const summaryParts: string[] = [];
-  const { stockPriceAction, trend, volatility, momentum, patterns } = currentAnalysis;
-
-  if (stockPriceAction && stockPriceAction.text && !stockPriceAction.text.includes("pending") && !stockPriceAction.text.includes("could not be generated")) {
-      summaryParts.push(`Price Action (${stockPriceAction.sentiment}): ${stockPriceAction.text}`);
+const constructAnalysisSummaryForChat = (currentAnalysis?: AnalyzeStockDataOutput, aiCalculatedTa?: AiCalculatedTaOutput): string | undefined => {
+  let summaryParts: string[] = [];
+  if (currentAnalysis) {
+    const { stockPriceAction, trend, volatility, momentum, patterns } = currentAnalysis;
+    if (stockPriceAction?.text && !stockPriceAction.text.includes("pending")) summaryParts.push(`Price Action (${stockPriceAction.sentiment}): ${stockPriceAction.text}`);
+    if (trend?.text && !trend.text.includes("pending")) summaryParts.push(`Trend (${trend.sentiment}): ${trend.text}`);
+    if (volatility?.text && !volatility.text.includes("pending")) summaryParts.push(`Volatility (${volatility.sentiment}): ${volatility.text}`);
+    if (momentum?.text && !momentum.text.includes("pending")) summaryParts.push(`Momentum (${momentum.sentiment}): ${momentum.text}`);
+    if (patterns?.text && !patterns.text.includes("pending")) summaryParts.push(`Patterns (${patterns.sentiment}): ${patterns.text}`);
   }
-  if (trend && trend.text && !trend.text.includes("pending") && !trend.text.includes("could not be generated")) {
-      summaryParts.push(`Trend (${trend.sentiment}): ${trend.text}`);
-  }
-  if (volatility && volatility.text && !volatility.text.includes("pending") && !volatility.text.includes("could not be generated")) {
-      summaryParts.push(`Volatility (${volatility.sentiment}): ${volatility.text}`);
-  }
-  if (momentum && momentum.text && !momentum.text.includes("pending") && !momentum.text.includes("could not be generated")) {
-      summaryParts.push(`Momentum (${momentum.sentiment}): ${momentum.text}`);
-  }
-  if (patterns && patterns.text && !patterns.text.includes("pending") && !patterns.text.includes("could not be generated")) {
-      summaryParts.push(`Patterns (${patterns.sentiment}): ${patterns.text}`);
+  if (aiCalculatedTa?.pivotLevels) {
+    summaryParts.push("AI Calculated Pivot Points:");
+    summaryParts.push(`  PP: ${aiCalculatedTa.pivotLevels.PP.toFixed(2)}`);
+    summaryParts.push(`  S1: ${aiCalculatedTa.pivotLevels.S1.toFixed(2)}, S2: ${aiCalculatedTa.pivotLevels.S2.toFixed(2)}, S3: ${aiCalculatedTa.pivotLevels.S3.toFixed(2)}`);
+    summaryParts.push(`  R1: ${aiCalculatedTa.pivotLevels.R1.toFixed(2)}, R2: ${aiCalculatedTa.pivotLevels.R2.toFixed(2)}, R3: ${aiCalculatedTa.pivotLevels.R3.toFixed(2)}`);
   }
   return summaryParts.length > 0 ? summaryParts.join('\\n') : undefined;
 };
@@ -127,24 +155,28 @@ const constructAnalysisSummaryForChat = (currentAnalysis?: AnalyzeStockDataOutpu
 
 interface StockAnalysisContextType {
   stockDataFetchState: StockDataFetchState;
+  aiCalculatedTaState: AiCalculatedTaState; // New
   aiAnalysisResultState: AiAnalysisResultState;
 
   submitFetchStockDataForm: (formData: FormData) => void;
   fetchStockDataPending: boolean;
+
+  submitCalculateAiTaForm: (formData: FormData) => void; // New
+  calculateAiTaPending: boolean; // New
 
   submitPerformAiAnalysisForm: (formData: FormData) => void;
   performAiAnalysisPending: boolean;
 
   combinedServerState: CombinedStockAnalysisState;
   cumulativeStats: CumulativeStats;
-  updateCumulativeStats: (report: UsageReport, flowType: 'analysis' | 'chat') => void;
+  updateCumulativeStats: (report: UsageReport, flowType: 'fetch' | 'ai_ta_calc' | 'analysis' | 'chat') => void; // Added flow types
 
   chatServerState: ContextChatState;
   submitChatForm: (formData: FormData) => void;
   chatFormPending: boolean;
   clearChatHistoryContext: () => void;
-  formRef: React.RefObject<HTMLFormElement> | null; // Add formRef
-  setFormRef: (ref: React.RefObject<HTMLFormElement> | null) => void; // Add setter for formRef
+  formRef: React.RefObject<HTMLFormElement> | null;
+  setFormRef: (ref: React.RefObject<HTMLFormElement> | null) => void;
 }
 
 const StockAnalysisContext = createContext<StockAnalysisContextType | undefined>(undefined);
@@ -157,7 +189,13 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
   ] = useActionState(fetchStockDataAction, initialStockDataFetchState);
 
   const [
-    aiAnalysisResultState,
+    aiCalculatedTaState, // New state hook for AI TA calculation
+    submitCalculateAiTaActionInternal,
+    calculateAiTaPending
+  ] = useActionState(calculateAiTaAction, initialAiCalculatedTaState);
+
+  const [
+    aiAnalysisResultState, // For Key Takeaways
     submitPerformAiAnalysisActionInternal,
     performAiAnalysisPending
   ] = useActionState(performAiAnalysisAction, initialAiAnalysisResultState);
@@ -168,13 +206,12 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
   const [triggerFullChatAfterAnalysis, setTriggerFullChatAfterAnalysis] = useState(false);
   const [formRef, setFormRefState] = useState<React.RefObject<HTMLFormElement> | null>(null);
 
-
   const lastProcessedFetchTimestamp = useRef<number | undefined>();
-  const lastProcessedAnalysisTimestamp = useRef<number | undefined>();
+  const lastProcessedAiTaCalcTimestamp = useRef<number | undefined>(); // New
+  const lastProcessedAnalysisTimestamp = useRef<number | undefined>(); // For Key Takeaways
   const lastChatAiMessageIdProcessedForToast = useRef<string | undefined>();
 
-
-  const updateCumulativeStats = useCallback((report: UsageReport, flowType: 'analysis' | 'chat') => {
+  const updateCumulativeStats = useCallback((report: UsageReport, flowType: 'fetch' | 'ai_ta_calc' | 'analysis' | 'chat') => {
     console.log(`[CONTEXT] Updating cumulative stats with report from ${flowType} for ${report.flowName}:`, report);
     setCumulativeStats(prev => ({
       totalInputTokens: prev.totalInputTokens + (report.inputTokens || 0),
@@ -185,96 +222,127 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // Effect 1: Process result of fetchStockDataAction
   useEffect(() => {
     console.log(`[CONTEXT:Effect:Fetch] stockDataFetchState changed. New timestamp: ${stockDataFetchState?.timestamp}, Last processed: ${lastProcessedFetchTimestamp.current}, Current context ticker: ${combinedServerState.tickerUsed}, FetchState ticker: ${stockDataFetchState?.tickerUsed}, InitiateFullChat: ${stockDataFetchState?.initiateFullChatAnalysis}`);
 
     if (!stockDataFetchState?.timestamp || stockDataFetchState.timestamp === lastProcessedFetchTimestamp.current) {
-      if (stockDataFetchState?.timestamp === lastProcessedFetchTimestamp.current && stockDataFetchState.analysisStatus === 'data_fetching' && !fetchStockDataPending) {
-        // This can happen if the same request is processed again by useActionState on re-render but action is not pending
-        // Usually safe to ignore if no other state indicates an issue
-      } else if (stockDataFetchState?.timestamp) {
-        console.log('[CONTEXT:Effect:Fetch] Skipping processing for stockDataFetchState: Timestamp has not changed or is undefined.');
-      }
+      // Avoid re-processing if timestamp hasn't changed or is undefined
       return;
     }
-
     if (stockDataFetchState.tickerUsed !== combinedServerState.tickerUsed && combinedServerState.analysisStatus !== 'idle' && combinedServerState.analysisStatus !== 'data_fetching') {
-        console.warn(`[CONTEXT:Effect:Fetch] Discarding stockDataFetchState update because its ticker "${stockDataFetchState.tickerUsed}" does not match current context ticker "${combinedServerState.tickerUsed}" and context is not in initial state. This may be a stale response.`);
+        console.warn(`[CONTEXT:Effect:Fetch] Discarding stockDataFetchState update due to ticker mismatch and context not in initial state.`);
         return;
     }
     
-    console.log(`[CONTEXT:Effect:Fetch] Processing stockDataFetchState for ticker "${stockDataFetchState.tickerUsed}". Status: ${stockDataFetchState.analysisStatus}`);
     lastProcessedFetchTimestamp.current = stockDataFetchState.timestamp;
-    
-    // Set triggerFullChatAfterAnalysis based on the initiateFullChatAnalysis flag from the action
-    // This ensures it's set correctly even if the action returns quickly
+    console.log(`[CONTEXT:Effect:Fetch] Processing stockDataFetchState for "${stockDataFetchState.tickerUsed}". Status: ${stockDataFetchState.analysisStatus}`);
+
     if (stockDataFetchState.initiateFullChatAnalysis && stockDataFetchState.analysisStatus !== 'error_fetching_data') {
-        console.log(`[CONTEXT:Effect:Fetch] Setting triggerFullChatAfterAnalysis to TRUE due to initiateFullChatAnalysis flag from fetchStockDataState.`);
         setTriggerFullChatAfterAnalysis(true);
     } else if (stockDataFetchState.analysisStatus === 'data_fetching' && !stockDataFetchState.initiateFullChatAnalysis) {
-      // If it's a new 'standard' fetch, ensure trigger is false.
-        console.log(`[CONTEXT:Effect:Fetch] Setting triggerFullChatAfterAnalysis to FALSE for new standard fetch.`);
         setTriggerFullChatAfterAnalysis(false);
     }
 
-
-    setCombinedServerState(prev => {
-      // Ensure we are updating for the correct ticker
-      if (stockDataFetchState.tickerUsed !== prev.tickerUsed && prev.analysisStatus !== 'idle' && prev.analysisStatus !== 'data_fetching') {
-        console.warn(`[CONTEXT:Effect:Fetch:SetCombined] Discarding stockDataFetchState update in setCombinedServerState because its ticker "${stockDataFetchState.tickerUsed}" does not match current prev ticker "${prev.tickerUsed}".`);
-        return prev; // Stale update, don't corrupt current state
-      }
-
-      return {
+    setCombinedServerState(prev => ({
         ...prev,
         stockJson: stockDataFetchState.stockJson,
         analysis: stockDataFetchState.error || !stockDataFetchState.stockJson ? initialCombinedStockAnalysisState.analysis : prev.analysis,
+        calculatedAiTaJson: stockDataFetchState.error || !stockDataFetchState.stockJson ? undefined : prev.calculatedAiTaJson,
+        calculatedAiTaObject: stockDataFetchState.error || !stockDataFetchState.stockJson ? undefined : prev.calculatedAiTaObject,
         error: stockDataFetchState.error,
         fieldErrors: stockDataFetchState.fieldErrors,
         timestamp: stockDataFetchState.timestamp,
         fetchUsageReport: stockDataFetchState.fetchUsageReport,
         analysisUsageReport: stockDataFetchState.error || !stockDataFetchState.stockJson ? undefined : prev.analysisUsageReport,
-        analysisStatus: stockDataFetchState.analysisStatus,
+        aiCalculatedTaUsageReport: stockDataFetchState.error || !stockDataFetchState.stockJson ? undefined : prev.aiCalculatedTaUsageReport,
+        analysisStatus: stockDataFetchState.error ? 'error_fetching_data' : 'data_fetched_ai_ta_pending', // Next step is AI TA calc
         dataSourceUsed: stockDataFetchState.dataSourceUsed,
-        // Persist initiateFullChatAnalysis from the latest fetch action state
         initiateFullChatAnalysis: stockDataFetchState.initiateFullChatAnalysis, 
-      };
-    });
+      }));
+    
+    if (stockDataFetchState.fetchUsageReport) {
+        updateCumulativeStats(stockDataFetchState.fetchUsageReport, 'fetch');
+    }
 
-  }, [stockDataFetchState, combinedServerState.tickerUsed, combinedServerState.analysisStatus, fetchStockDataPending, updateCumulativeStats]);
+    // If data fetch was successful, trigger AI TA calculation
+    if (stockDataFetchState.analysisStatus === 'data_fetched_analysis_pending' && stockDataFetchState.stockJson && stockDataFetchState.tickerUsed) {
+        console.log(`[CONTEXT:Effect:Fetch] Data fetch complete for "${stockDataFetchState.tickerUsed}". Triggering AI TA calculation.`);
+        const aiTaFormData = new FormData();
+        aiTaFormData.append('polygonStockJsonString', stockDataFetchState.stockJson);
+        aiTaFormData.append('ticker', stockDataFetchState.tickerUsed);
+        submitCalculateAiTaForm(aiTaFormData); // New dispatcher call
+    }
+
+  }, [stockDataFetchState, combinedServerState.tickerUsed, combinedServerState.analysisStatus, updateCumulativeStats]);
 
 
+  // Effect 2: Process result of calculateAiTaAction (New)
   useEffect(() => {
-    console.log(`[CONTEXT:Effect:Analysis] aiAnalysisResultState changed. New timestamp: ${aiAnalysisResultState?.timestamp}, Last processed: ${lastProcessedAnalysisTimestamp.current}, Current context ticker: ${combinedServerState.tickerUsed}, AnalysisState ticker: ${aiAnalysisResultState?.tickerAnalyzed}`);
+    console.log(`[CONTEXT:Effect:AiTaCalc] aiCalculatedTaState changed. New timestamp: ${aiCalculatedTaState?.timestamp}, Last processed: ${lastProcessedAiTaCalcTimestamp.current}, Context ticker: ${combinedServerState.tickerUsed}, AiTaCalc ticker: ${aiCalculatedTaState?.tickerAnalyzed}`);
 
-    if (!aiAnalysisResultState?.timestamp || aiAnalysisResultState.timestamp === lastProcessedAnalysisTimestamp.current) {
-       console.log('[CONTEXT:Effect:Analysis] Skipping processing for aiAnalysisResultState: Timestamp has not changed or is undefined.');
+    if (!aiCalculatedTaState?.timestamp || aiCalculatedTaState.timestamp === lastProcessedAiTaCalcTimestamp.current) {
+      return;
+    }
+    if (aiCalculatedTaState.tickerAnalyzed !== combinedServerState.tickerUsed) {
+      console.warn(`[CONTEXT:Effect:AiTaCalc] Discarding aiCalculatedTaState update due to ticker mismatch.`);
       return;
     }
 
-    if (aiAnalysisResultState.tickerAnalyzed !== combinedServerState.tickerUsed) {
-        console.warn(`[CONTEXT:Effect:Analysis] Discarding aiAnalysisResultState update because its ticker "${aiAnalysisResultState.tickerAnalyzed}" does not match current context ticker "${combinedServerState.tickerUsed}". This may be a stale response.`);
-        return;
+    lastProcessedAiTaCalcTimestamp.current = aiCalculatedTaState.timestamp;
+    console.log(`[CONTEXT:Effect:AiTaCalc] Processing aiCalculatedTaState for "${aiCalculatedTaState.tickerAnalyzed}". Error: ${aiCalculatedTaState.error}`);
+
+    setCombinedServerState(prev => ({
+      ...prev,
+      calculatedAiTaJson: aiCalculatedTaState.calculatedTaJson,
+      calculatedAiTaObject: aiCalculatedTaState.calculatedTaObject,
+      aiCalculatedTaUsageReport: aiCalculatedTaState.calculatedTaUsageReport,
+      error: aiCalculatedTaState.error || (prev.analysisStatus === 'error_fetching_data' ? prev.error : undefined), // Preserve fetch error
+      fieldErrors: aiCalculatedTaState.fieldErrors || prev.fieldErrors,
+      analysisStatus: aiCalculatedTaState.error ? 'error_calculating_ai_ta' : 'ai_ta_calculated_key_takeaways_pending', // Next step is key takeaways
+      timestamp: aiCalculatedTaState.timestamp,
+    }));
+
+    if (aiCalculatedTaState.calculatedTaUsageReport) {
+      updateCumulativeStats(aiCalculatedTaState.calculatedTaUsageReport, 'ai_ta_calc');
     }
-    console.log(`[CONTEXT:Effect:Analysis] Processing aiAnalysisResultState for ticker "${aiAnalysisResultState.tickerAnalyzed}". Error: ${aiAnalysisResultState.error}`);
+
+    // If AI TA calculation was successful, trigger Key Takeaways analysis
+    if (!aiCalculatedTaState.error && combinedServerState.stockJson && combinedServerState.tickerUsed && aiCalculatedTaState.calculatedTaJson) {
+      console.log(`[CONTEXT:Effect:AiTaCalc] AI TA calculation complete for "${combinedServerState.tickerUsed}". Triggering Key Takeaways analysis.`);
+      const keyTakeawaysFormData = new FormData();
+      keyTakeawaysFormData.append('stockJsonString', combinedServerState.stockJson);
+      keyTakeawaysFormData.append('ticker', combinedServerState.tickerUsed);
+      keyTakeawaysFormData.append('aiCalculatedTaJsonString', aiCalculatedTaState.calculatedTaJson); // Pass new AI TA data
+      submitPerformAiAnalysisForm(keyTakeawaysFormData);
+    }
+  }, [aiCalculatedTaState, combinedServerState.tickerUsed, combinedServerState.stockJson, updateCumulativeStats]);
+
+  // Effect 3: Process result of performAiAnalysisAction (Key Takeaways)
+  useEffect(() => {
+    console.log(`[CONTEXT:Effect:KeyTakeaways] aiAnalysisResultState changed. New timestamp: ${aiAnalysisResultState?.timestamp}, Last processed: ${lastProcessedAnalysisTimestamp.current}, Context ticker: ${combinedServerState.tickerUsed}, KeyTakeaways ticker: ${aiAnalysisResultState?.tickerAnalyzed}`);
+
+    if (!aiAnalysisResultState?.timestamp || aiAnalysisResultState.timestamp === lastProcessedAnalysisTimestamp.current) {
+      return;
+    }
+    if (aiAnalysisResultState.tickerAnalyzed !== combinedServerState.tickerUsed) {
+      console.warn(`[CONTEXT:Effect:KeyTakeaways] Discarding aiAnalysisResultState update due to ticker mismatch.`);
+      return;
+    }
+
     lastProcessedAnalysisTimestamp.current = aiAnalysisResultState.timestamp;
+    console.log(`[CONTEXT:Effect:KeyTakeaways] Processing aiAnalysisResultState for "${aiAnalysisResultState.tickerAnalyzed}". Error: ${aiAnalysisResultState.error}`);
 
-    setCombinedServerState(prev => {
-      if (aiAnalysisResultState.tickerAnalyzed !== prev.tickerUsed) {
-        console.warn(`[CONTEXT:Effect:Analysis:SetCombined] Discarding aiAnalysisResultState update in setCombinedServerState because its ticker "${aiAnalysisResultState.tickerAnalyzed}" does not match current prev ticker "${prev.tickerUsed}".`);
-        return prev;
-      }
-      return {
-        ...prev,
-        analysis: aiAnalysisResultState.analysis || initialCombinedStockAnalysisState.analysis,
-        analysisUsageReport: aiAnalysisResultState.analysisUsageReport,
-        error: aiAnalysisResultState.error || (prev.analysisStatus === 'error_fetching_data' ? prev.error : undefined),
-        analysisStatus: aiAnalysisResultState.error ? 'error_analyzing_data' : 'analysis_complete',
-        timestamp: aiAnalysisResultState.timestamp, // This should be the AI analysis timestamp
-      };
-    });
+    setCombinedServerState(prev => ({
+      ...prev,
+      analysis: aiAnalysisResultState.analysis || initialCombinedStockAnalysisState.analysis,
+      analysisUsageReport: aiAnalysisResultState.analysisUsageReport,
+      error: aiAnalysisResultState.error || (prev.analysisStatus === 'error_fetching_data' || prev.analysisStatus === 'error_calculating_ai_ta' ? prev.error : undefined), // Preserve earlier errors
+      analysisStatus: aiAnalysisResultState.error ? 'error_analyzing_data' : 'analysis_complete',
+      timestamp: aiAnalysisResultState.timestamp,
+    }));
 
-    if (aiAnalysisResultState.analysisUsageReport && aiAnalysisResultState.tickerAnalyzed === combinedServerState.tickerUsed && !aiAnalysisResultState.error) {
+    if (aiAnalysisResultState.analysisUsageReport) {
         updateCumulativeStats(aiAnalysisResultState.analysisUsageReport, 'analysis');
     }
   }, [aiAnalysisResultState, combinedServerState.tickerUsed, updateCumulativeStats]);
@@ -283,102 +351,75 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
   const submitFetchStockDataForm = useCallback((formData: FormData) => {
     const ticker = formData.get('ticker') as string | null;
     const dataSource = formData.get('dataSource') as string | null;
-    const analysisType = formData.get('analysisType') as string | null; // Will be 'standard' or 'fullDetail'
+    const analysisType = formData.get('analysisType') as string | null;
     const processingTicker = ticker?.trim().toUpperCase() || "NVDA";
-
-    console.log(
-      `[CONTEXT_REQUEST] Action: fetchStockDataAction FOR TICKER: "${processingTicker}"`,
-      { dataSource, analysisType }
-    );
-    
     const isFullDetail = analysisType === 'fullDetail';
+
+    console.log(`[CONTEXT_REQUEST] Action: fetchStockDataAction FOR TICKER: "${processingTicker}"`, { dataSource, analysisType });
     console.log(`[CONTEXT] submitFetchStockDataForm: analysisType from form is "${analysisType}". Setting triggerFullChatAfterAnalysis to ${isFullDetail}`);
     setTriggerFullChatAfterAnalysis(isFullDetail); 
 
-    setCombinedServerState({ // Reset state for new request
+    setCombinedServerState({
         ...initialCombinedStockAnalysisState,
         tickerUsed: processingTicker,
         dataSourceUsed: dataSource as DataSourceId,
         analysisStatus: 'data_fetching',
         timestamp: Date.now(),
-        initiateFullChatAnalysis: isFullDetail, // Set based on the button clicked
+        initiateFullChatAnalysis: isFullDetail,
     });
+    lastProcessedFetchTimestamp.current = undefined;
+    lastProcessedAiTaCalcTimestamp.current = undefined; // Reset for new sequence
+    lastProcessedAnalysisTimestamp.current = undefined;
 
-    lastProcessedFetchTimestamp.current = undefined; // Reset for new fetch
-    lastProcessedAnalysisTimestamp.current = undefined; // Reset for new analysis sequence
-
-    startTransition(() => {
-      submitFetchStockDataActionInternal(formData);
-    });
+    startTransition(() => submitFetchStockDataActionInternal(formData));
   }, [submitFetchStockDataActionInternal]);
+
+  // New dispatcher for AI TA Calculation
+  const submitCalculateAiTaForm = useCallback((formData: FormData) => {
+    const tickerToAnalyze = formData.get('ticker') as string | null;
+    console.log(`[CONTEXT_REQUEST] Action: calculateAiTaAction FOR TICKER: "${tickerToAnalyze || 'N/A'}" (Context ticker is "${combinedServerState.tickerUsed}")`);
+
+    if (tickerToAnalyze !== combinedServerState.tickerUsed) {
+      console.warn(`[CONTEXT_REQUEST:AiTaCalc] Aborting AI TA calculation: Form data ticker "${tickerToAnalyze}" != context ticker "${combinedServerState.tickerUsed}".`);
+      setCombinedServerState(prev => ({ ...prev, error: `AI TA calculation for ${tickerToAnalyze} aborted. Context changed.`, analysisStatus: 'error_calculating_ai_ta' }));
+      return;
+    }
+    setCombinedServerState(prev => ({ ...prev, analysisStatus: 'calculating_ai_ta', error: undefined, aiCalculatedTaUsageReport: undefined, calculatedAiTaJson: undefined, calculatedAiTaObject: undefined, timestamp: Date.now() }));
+    startTransition(() => submitCalculateAiTaActionInternal(formData));
+  }, [submitCalculateAiTaActionInternal, combinedServerState.tickerUsed]);
 
 
   const submitPerformAiAnalysisForm = useCallback((formData: FormData) => {
     const tickerToAnalyze = formData.get('ticker') as string | null;
-    console.log(
-        `[CONTEXT_REQUEST] Action: performAiAnalysisAction FOR TICKER: "${tickerToAnalyze || 'N/A'}" (Context ticker is "${combinedServerState.tickerUsed}")`,
-        { stockJsonStringPresent: !!formData.get('stockJsonString') }
-    );
+    console.log(`[CONTEXT_REQUEST] Action: performAiAnalysisAction (Key Takeaways) FOR TICKER: "${tickerToAnalyze || 'N/A'}" (Context ticker is "${combinedServerState.tickerUsed}")`, { stockJsonStringPresent: !!formData.get('stockJsonString'), aiCalculatedTaJsonStringPresent: !!formData.get('aiCalculatedTaJsonString') });
 
     if (tickerToAnalyze !== combinedServerState.tickerUsed) {
-      console.warn(`[CONTEXT_REQUEST:AIAnalysis] Aborting AI key takeaways analysis call: Form data ticker "${tickerToAnalyze}" does not match current context ticker "${combinedServerState.tickerUsed}".`);
-      setCombinedServerState(prev => ({
-        ...prev,
-        error: `Key takeaways analysis for ${tickerToAnalyze} aborted as context changed to ${prev.tickerUsed}. Please re-analyze ${prev.tickerUsed}.`,
-        analysisStatus: 'error_analyzing_data',
-      }));
+      console.warn(`[CONTEXT_REQUEST:KeyTakeaways] Aborting Key Takeaways analysis: Form data ticker "${tickerToAnalyze}" != context ticker "${combinedServerState.tickerUsed}".`);
+      setCombinedServerState(prev => ({ ...prev, error: `Key Takeaways analysis for ${tickerToAnalyze} aborted. Context changed.`, analysisStatus: 'error_analyzing_data' }));
       return;
     }
-
-    setCombinedServerState(prev => ({
-      ...prev,
-      analysisStatus: 'analyzing_data',
-      error: undefined, // Clear previous errors for analysis stage
-      analysisUsageReport: undefined, // Clear previous usage
-      analysis: initialCombinedStockAnalysisState.analysis, // Reset to pending
-      timestamp: Date.now(),
-    }));
-
-    startTransition(() => {
-      submitPerformAiAnalysisActionInternal(formData);
-    });
+    setCombinedServerState(prev => ({ ...prev, analysisStatus: 'analyzing_data', error: undefined, analysisUsageReport: undefined, analysis: initialCombinedStockAnalysisState.analysis, timestamp: Date.now() }));
+    startTransition(() => submitPerformAiAnalysisActionInternal(formData));
   }, [submitPerformAiAnalysisActionInternal, combinedServerState.tickerUsed]);
 
 
   const [chatServerState, submitChatFormAction, chatFormPending] = useActionState(
     async (prevState: ContextChatState, formData: FormData): Promise<ContextChatState> => {
       if (formData.get('_clear_history_signal_')) {
-        console.log("[CONTEXT] Chat history clear signal received by action wrapper.");
         return { ...initialChatState, timestamp: Date.now() };
       }
       const { handleChatSubmit } = await import('@/actions/chat-server-action');
       const result = await handleChatSubmit(prevState, formData);
-      return {
-        messages: result.messages as ContextChatMessage[],
-        error: result.error,
-        latestAiUsageReport: result.latestAiUsageReport,
-        timestamp: result.timestamp || Date.now(),
-      };
+      return { messages: result.messages as ContextChatMessage[], error: result.error, latestAiUsageReport: result.latestAiUsageReport, timestamp: result.timestamp || Date.now() };
     },
     initialChatState
   );
 
   const submitChatForm = useCallback((formData: FormData) => {
-     console.log(
-       '[CLIENT_REQUEST] Action: handleChatSubmit (via context), Payload:',
-       {
-         userPrompt: formData.get('userPrompt'),
-         stockJsonPresent: !!formData.get('stockJson'),
-         analysisSummaryPresent: !!formData.get('analysisSummary'),
-         chatHistoryPresent: !!formData.get('chatHistory'),
-       }
-     );
-    startTransition(() => {
-      submitChatFormAction(formData);
-    });
+     console.log('[CLIENT_REQUEST] Action: handleChatSubmit (via context), Payload:', { userPrompt: formData.get('userPrompt'), stockJsonPresent: !!formData.get('stockJson'), analysisSummaryPresent: !!formData.get('analysisSummary'), chatHistoryPresent: !!formData.get('chatHistory') });
+    startTransition(() => submitChatFormAction(formData));
   }, [submitChatFormAction]);
 
-  // Effect to trigger full detailed chat analysis
   useEffect(() => {
     const analysisIsCompleteAndValid = combinedServerState.analysisStatus === 'analysis_complete' &&
                                      !!combinedServerState.analysis &&
@@ -389,65 +430,39 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
 
     if (triggerFullChatAfterAnalysis && analysisIsCompleteAndValid && !chatFormPending && combinedServerState.tickerUsed) {
       console.log(`[CONTEXT:Effect:AutoChat] Conditions MET for ticker "${combinedServerState.tickerUsed}". Triggering "Full Detailed Analysis" chat.`);
-
       const fullAnalysisPrompt = examplePrompts.find(p => p.id === 'ex_full_detailed_analysis');
       if (!fullAnalysisPrompt) {
-        console.error('[CONTEXT:Effect:AutoChat] "Full Detailed Analysis" prompt not found in examplePrompts.');
+        console.error('[CONTEXT:Effect:AutoChat] "Full Detailed Analysis" prompt not found.');
         setTriggerFullChatAfterAnalysis(false);
         return;
       }
-
       const chatFormData = new FormData();
       chatFormData.append('userPrompt', fullAnalysisPrompt.promptText);
-
       if (combinedServerState.stockJson) {
         try {
           const parsedJson = JSON.parse(combinedServerState.stockJson);
-          if (parsedJson.stockSnapshot?.ticker === combinedServerState.tickerUsed) {
-            chatFormData.append('stockJson', combinedServerState.stockJson);
-          } else {
-             console.warn(`[CONTEXT:Effect:AutoChat] Stock JSON ticker (${parsedJson.stockSnapshot?.ticker}) does not match context ticker (${combinedServerState.tickerUsed}). Not sending stockJson for auto-chat.`);
-          }
-        } catch (e) {
-          console.error("[CONTEXT:Effect:AutoChat] Error parsing stockJson for auto-chat context:", e);
-        }
+          if (parsedJson.stockSnapshot?.ticker === combinedServerState.tickerUsed) chatFormData.append('stockJson', combinedServerState.stockJson);
+        } catch (e) { console.error("[CONTEXT:Effect:AutoChat] Error parsing stockJson for auto-chat context:", e); }
       }
-
-      const analysisSummary = constructAnalysisSummaryForChat(combinedServerState.analysis);
-      if (analysisSummary) {
-        chatFormData.append('analysisSummary', analysisSummary);
+      // Pass AI Calculated TA JSON to chat context as well
+      if (combinedServerState.calculatedAiTaJson) {
+        chatFormData.append('aiCalculatedTaJson', combinedServerState.calculatedAiTaJson);
       }
-      
+      const analysisSummary = constructAnalysisSummaryForChat(combinedServerState.analysis, combinedServerState.calculatedAiTaObject);
+      if (analysisSummary) chatFormData.append('analysisSummary', analysisSummary);
       chatFormData.append('chatHistory', JSON.stringify(chatServerState.messages || []));
-      
-      console.log('[CONTEXT:Effect:AutoChat] Submitting "Full Detailed Analysis" chat form automatically.');
       submitChatForm(chatFormData);
       setTriggerFullChatAfterAnalysis(false); 
-    } else if (triggerFullChatAfterAnalysis && (combinedServerState.analysisStatus === 'error_fetching_data' || combinedServerState.analysisStatus === 'error_analyzing_data')) {
-      console.warn(`[CONTEXT:Effect:AutoChat] Full detailed analysis chat aborted for "${combinedServerState.tickerUsed}" because initial analysis failed. Status: ${combinedServerState.analysisStatus}`);
+    } else if (triggerFullChatAfterAnalysis && (combinedServerState.analysisStatus === 'error_fetching_data' || combinedServerState.analysisStatus === 'error_calculating_ai_ta' || combinedServerState.analysisStatus === 'error_analyzing_data')) {
+      console.warn(`[CONTEXT:Effect:AutoChat] Full detailed analysis chat aborted for "${combinedServerState.tickerUsed}" due to prior error. Status: ${combinedServerState.analysisStatus}`);
       setTriggerFullChatAfterAnalysis(false); 
     }
-
-  }, [
-    triggerFullChatAfterAnalysis,
-    combinedServerState.analysisStatus,
-    combinedServerState.analysis,
-    combinedServerState.tickerUsed,
-    combinedServerState.stockJson,
-    aiAnalysisResultState?.tickerAnalyzed,
-    chatFormPending,
-    chatServerState.messages, 
-    submitChatForm,
-  ]);
-
+  }, [ triggerFullChatAfterAnalysis, combinedServerState, aiAnalysisResultState?.tickerAnalyzed, chatFormPending, chatServerState.messages, submitChatForm ]);
 
   const clearChatHistoryContext = useCallback(() => {
-    console.log('[CONTEXT] clearChatHistoryContext called. Dispatching clear signal via submitChatFormAction.');
     const dummyFormData = new FormData();
     dummyFormData.append('_clear_history_signal_', 'true');
-    startTransition(() => {
-      submitChatFormAction(dummyFormData);
-    });
+    startTransition(() => submitChatFormAction(dummyFormData));
   }, [submitChatFormAction]);
 
   useEffect(() => {
@@ -464,12 +479,14 @@ export function StockAnalysisProvider({ children }: { children: ReactNode }) {
     setFormRefState(ref);
   }, []);
 
-
   const contextValue: StockAnalysisContextType = {
     stockDataFetchState,
+    aiCalculatedTaState, // New
     aiAnalysisResultState,
     submitFetchStockDataForm,
     fetchStockDataPending,
+    submitCalculateAiTaForm, // New
+    calculateAiTaPending, // New
     submitPerformAiAnalysisForm,
     performAiAnalysisPending,
     combinedServerState,
@@ -497,11 +514,3 @@ export function useStockAnalysisContext() {
   }
   return context;
 }
-
-declare module '@/ai/schemas/common-schemas' {
-  interface UsageReport {
-    timestampForCompare?: number;
-  }
-}
-
-    
